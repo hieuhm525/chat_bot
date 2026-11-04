@@ -2,6 +2,9 @@
 
 Một lõi `handle_message()` dùng chung cho mock UI và webhook Messenger (L1).
 """
+import hashlib
+import hmac
+import json
 import logging
 import os
 import sqlite3
@@ -12,8 +15,8 @@ from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel
 
 load_dotenv()
@@ -29,6 +32,13 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "300"))
 HISTORY_LIMIT = 10
+
+SEND_MODE = os.getenv("SEND_MODE", "mock")
+PAGE_TOKEN = os.getenv("PAGE_TOKEN", "")
+APP_SECRET = os.getenv("APP_SECRET", "")
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "")
+GRAPH_VERSION = os.getenv("GRAPH_VERSION", "v23.0")
+GRAPH_URL = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
 FALLBACK = (
     "Dạ em chưa có thông tin này, anh/chị để lại số điện thoại "
@@ -157,6 +167,44 @@ def handle_message(psid: str, text: str, mid: str | None = None) -> str | None:
     return reply
 
 
+def send_sender_action(psid: str, action: str = "typing_on") -> None:
+    if SEND_MODE != "meta":
+        return
+    httpx.post(
+        f"{GRAPH_URL}/me/messages",
+        params={"access_token": PAGE_TOKEN},
+        json={"recipient": {"id": psid}, "sender_action": action},
+        timeout=5,
+    )
+
+
+def send_text(psid: str, text: str) -> None:
+    if SEND_MODE != "meta":
+        log.info("[mock send] %s -> %s", psid, text)
+        return
+    r = httpx.post(
+        f"{GRAPH_URL}/me/messages",
+        params={"access_token": PAGE_TOKEN},
+        json={
+            "recipient": {"id": psid},
+            "messaging_type": "RESPONSE",
+            "message": {"text": text[:2000]},
+        },
+        timeout=10,
+    )
+    r.raise_for_status()
+
+
+def process_message(psid: str, text: str, mid: str | None = None) -> None:
+    try:
+        send_sender_action(psid)
+        reply = handle_message(psid, text, mid)
+        if reply:
+            send_text(psid, reply)
+    except Exception:
+        log.exception("Xử lý tin thất bại psid=%s", psid)
+
+
 app = FastAPI(title="CSKH Bot")
 init_db()
 
@@ -190,3 +238,43 @@ def reset(psid: str = "web:local"):
 @app.get("/healthz")
 def healthz():
     return {"ok": True, "db": os.path.exists(DB_PATH)}
+
+
+@app.get("/webhook")
+def verify_webhook(
+    mode: str = Query(default="", alias="hub.mode"),
+    token: str = Query(default="", alias="hub.verify_token"),
+    challenge: str = Query(default="", alias="hub.challenge"),
+):
+    if mode == "subscribe" and VERIFY_TOKEN and token == VERIFY_TOKEN:
+        return PlainTextResponse(challenge)
+    raise HTTPException(403, "verify token không khớp")
+
+
+@app.post("/webhook")
+async def receive_webhook(request: Request, background: BackgroundTasks):
+    raw = await request.body()
+    if APP_SECRET:
+        expected = "sha256=" + hmac.new(
+            APP_SECRET.encode(), raw, hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(request.headers.get("x-hub-signature-256", ""), expected):
+            raise HTTPException(403, "sai chữ ký")
+    try:
+        body = json.loads(raw or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(400, "payload không phải JSON")
+
+    if body.get("object") == "page":
+        for entry in body.get("entry", []):
+            for event in entry.get("messaging", []):
+                msg = event.get("message") or {}
+                if msg.get("is_echo") or not msg.get("text"):
+                    continue
+                background.add_task(
+                    process_message,
+                    event["sender"]["id"],
+                    msg["text"],
+                    msg.get("mid"),
+                )
+    return {"ok": True}

@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import json
 import time
 
 import pytest
@@ -6,6 +9,26 @@ from fastapi.testclient import TestClient
 import app as bot
 
 client = TestClient(bot.app)
+
+
+def payload(text="chào", mid="m-1", echo=False):
+    return {
+        "object": "page",
+        "entry": [
+            {
+                "id": "PAGE",
+                "time": 0,
+                "messaging": [
+                    {
+                        "sender": {"id": "psid-1"},
+                        "recipient": {"id": "PAGE"},
+                        "timestamp": 0,
+                        "message": {"mid": mid, "text": text, "is_echo": echo},
+                    }
+                ],
+            }
+        ],
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -50,3 +73,49 @@ def test_paused_bot_stays_silent():
 
 def test_empty_message_rejected():
     assert client.post("/chat", json={"text": "   "}).status_code == 400
+
+
+def test_webhook_verify_ok(monkeypatch):
+    monkeypatch.setattr(bot, "VERIFY_TOKEN", "secret")
+    r = client.get(
+        "/webhook",
+        params={"hub.mode": "subscribe", "hub.verify_token": "secret", "hub.challenge": "123"},
+    )
+    assert r.status_code == 200
+    assert r.text == "123"
+
+
+def test_webhook_verify_bad(monkeypatch):
+    monkeypatch.setattr(bot, "VERIFY_TOKEN", "secret")
+    r = client.get(
+        "/webhook",
+        params={"hub.mode": "subscribe", "hub.verify_token": "sai", "hub.challenge": "1"},
+    )
+    assert r.status_code == 403
+
+
+def test_webhook_signature_and_reply(monkeypatch):
+    monkeypatch.setattr(bot, "APP_SECRET", "s3cret")
+    sent = []
+    monkeypatch.setattr(bot, "send_text", lambda psid, text: sent.append((psid, text)))
+    body = json.dumps(payload()).encode()
+    sig = "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
+    r = client.post("/webhook", content=body, headers={"x-hub-signature-256": sig})
+    assert r.status_code == 200
+    assert sent == [("psid-1", "Giá 100.000đ ạ.")]
+
+
+def test_webhook_bad_signature(monkeypatch):
+    monkeypatch.setattr(bot, "APP_SECRET", "s3cret")
+    body = json.dumps(payload()).encode()
+    r = client.post("/webhook", content=body, headers={"x-hub-signature-256": "sha256=bad"})
+    assert r.status_code == 403
+
+
+def test_webhook_ignores_echo(monkeypatch):
+    monkeypatch.setattr(bot, "APP_SECRET", "")
+    sent = []
+    monkeypatch.setattr(bot, "send_text", lambda psid, text: sent.append(text))
+    body = json.dumps(payload(echo=True)).encode()
+    assert client.post("/webhook", content=body).status_code == 200
+    assert sent == []

@@ -84,14 +84,20 @@ Real mode:  FB Page ──webhook──►│                              │�
 - [x] `test_app.py`: 5 case (trong FAQ, ngoài FAQ, LLM lỗi, tin trùng, tin rỗng) — pass.
 - **DoD:** mở `localhost:8000`, gõ "giá bao nhiêu" → nhận câu trả lời từ FAQ; dữ liệu nằm trong `chat.db`.
 
-### L1 — Nối Messenger thật (≈1 giờ + chờ)
-- [ ] Chạy `ngrok http 8000`, lấy HTTPS URL.
-- [ ] Điền webhook + verify token trên dashboard → bấm **Verify and Save**.
-- [ ] Subscribe `messages`, `messaging_postbacks`.
-- [ ] `GET /webhook` trả `hub.challenge`; `POST /webhook` verify `X-Hub-Signature-256`.
-- [ ] `POST /webhook` trả 200 ngay, xử lý LLM ở `BackgroundTasks`.
-- [ ] Send API `POST /me/messages` với `messaging_type=RESPONSE`, typing indicator trước.
-- **DoD:** tài khoản khách nhắn Page → nhận trả lời trong Messenger; log server hiện đúng `psid`.
+### L1 — Nối Messenger thật (≈1 giờ + chờ) — 🔄 code xong, chờ cấu hình Meta
+- [x] Cài `cloudflared`, tunnel công khai đang chạy.
+- [x] `GET /webhook` trả `hub.challenge`; `POST /webhook` verify `X-Hub-Signature-256`.
+- [x] `POST /webhook` trả 200 ngay, xử lý LLM ở `BackgroundTasks`.
+- [x] Send API `POST /me/messages` + typing indicator, bật bằng `SEND_MODE=meta`.
+- [x] 5 test webhook (verify, sai token, chữ ký, echo) — pass.
+- [ ] Điền `PAGE_TOKEN`, `APP_SECRET` vào `.env`.
+- [ ] Khai báo webhook trên App Dashboard, subscribe `messages` + `messaging_postbacks`.
+- [ ] Đổi `SEND_MODE=meta`, restart server.
+- **DoD:** tài khoản admin nhắn Page → nhận trả lời trong Messenger; log server hiện đúng `psid`.
+
+**URL hiện tại:** `https://enjoyed-contacting-sentence-curve.trycloudflare.com/webhook`
+**Verify token:** `doi-mot-chuoi-ngau-nhien`
+Lưu ý: URL đổi mỗi lần restart `cloudflared` → phải cập nhật lại trên dashboard.
 
 ### L2 — Chống lỗi cơ bản (≈30 phút)
 - [ ] Dedupe theo `mid` (unique index), lock theo `psid`.
