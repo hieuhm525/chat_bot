@@ -9,6 +9,7 @@ import logging
 import os
 import sqlite3
 import time
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -91,11 +92,14 @@ def init_db(path: str | None = None) -> None:
         c.execute("CREATE INDEX IF NOT EXISTS idx_messages_psid ON messages(psid, id)")
 
 
+_http = httpx.Client(timeout=30)  # giữ kết nối TLS, mỗi tin nhắn đỡ tốn ~1s bắt tay
+
+
 def _chat_completion(messages: list[dict]) -> str:
     headers = {"Content-Type": "application/json"}
     if LLM_API_KEY:
         headers["Authorization"] = f"Bearer {LLM_API_KEY}"
-    r = httpx.post(
+    r = _http.post(
         f"{LLM_BASE_URL}/chat/completions",
         headers=headers,
         json={
@@ -104,10 +108,36 @@ def _chat_completion(messages: list[dict]) -> str:
             "temperature": 0.3,
             "max_tokens": MAX_TOKENS,
         },
-        timeout=10,
     )
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
+
+
+def _norm(s: str) -> str:
+    s = unicodedata.normalize("NFD", s.lower())
+    return " ".join("".join(c for c in s if unicodedata.category(c) != "Mn").split())
+
+
+def faq_answer(text: str) -> str | None:
+    """Trả lời ngay từ FAQ khi câu hỏi khớp tiêu đề mục, khỏi chờ LLM 10–30s."""
+    if not FAQ_PATH.exists():
+        return None
+    q = set(_norm(text).split())
+    scored = []
+    for block in FAQ_PATH.read_text(encoding="utf-8").split("\n## ")[1:]:
+        title, _, body = block.partition("\n")
+        words = {w for w in _norm(title).split() if len(w) > 1}
+        if len(words) < 2:
+            continue
+        hit = len(words & q)
+        scored.append((hit / len(words), hit, title.strip(), body.strip()))
+    scored.sort(reverse=True)
+    # cần khớp >=2 từ tiêu đề và >=60% số từ, tránh đoán bừa
+    if not scored or scored[0][1] < 2 or scored[0][0] < 0.6:
+        return None
+    if len(scored) > 1 and scored[0][:2] == scored[1][:2]:
+        return None  # hoà điểm thì để LLM quyết
+    return f"Dạ, {scored[0][3]}"
 
 
 def ask_llm(history: list[dict], text: str) -> str:
@@ -161,7 +191,7 @@ def handle_message(psid: str, text: str, mid: str | None = None) -> str | None:
         ).fetchall()
 
     history = [{"role": r["role"], "content": r["text"]} for r in reversed(rows)]
-    reply = ask_llm(history, text)
+    reply = faq_answer(text) or ask_llm(history, text)
     if is_new:
         # Chính sách Messenger: công khai là bot ở đầu hội thoại.
         reply = f"Dạ em là trợ lý tự động của {SHOP_NAME}. " + reply

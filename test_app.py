@@ -55,6 +55,15 @@ def test_duplicate_mid():
         assert c.execute("SELECT COUNT(*) FROM messages WHERE psid='p1'").fetchone()[0] == 2
 
 
+def test_faq_match_skips_llm(monkeypatch):
+    def boom(messages):
+        raise AssertionError("không được gọi LLM khi FAQ đã khớp")
+
+    monkeypatch.setattr(bot, "_chat_completion", boom)
+    assert "1–2 ngày" in bot.handle_message("p9", "shop ơi giao hang may ngay")
+    assert bot.faq_answer("chào shop") is None
+
+
 def test_llm_error_falls_back(monkeypatch):
     def boom(messages):
         raise RuntimeError("llm down")
