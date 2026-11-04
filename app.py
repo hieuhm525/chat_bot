@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("bot")
 
 DB_PATH = os.getenv("DB_PATH", "chat.db")
