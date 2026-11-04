@@ -37,7 +37,7 @@ SEND_MODE = os.getenv("SEND_MODE", "mock")
 PAGE_TOKEN = os.getenv("PAGE_TOKEN", "")
 APP_SECRET = os.getenv("APP_SECRET", "")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "")
-GRAPH_VERSION = os.getenv("GRAPH_VERSION", "v23.0")
+GRAPH_VERSION = os.getenv("GRAPH_VERSION", "v26.0")
 GRAPH_URL = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
 FALLBACK = (
@@ -133,6 +133,10 @@ def handle_message(psid: str, text: str, mid: str | None = None) -> str | None:
     now = time.time()
 
     with db() as c:
+        is_new = (
+            c.execute("SELECT 1 FROM messages WHERE psid=? LIMIT 1", (psid,)).fetchone()
+            is None
+        )
         try:
             c.execute(
                 "INSERT INTO messages(psid, mid, role, text, created_at) VALUES(?,?,?,?,?)",
@@ -158,6 +162,9 @@ def handle_message(psid: str, text: str, mid: str | None = None) -> str | None:
 
     history = [{"role": r["role"], "content": r["text"]} for r in reversed(rows)]
     reply = ask_llm(history, text)
+    if is_new:
+        # Chính sách Messenger: công khai là bot ở đầu hội thoại.
+        reply = f"Dạ em là trợ lý tự động của {SHOP_NAME}. " + reply
 
     with db() as c:
         c.execute(

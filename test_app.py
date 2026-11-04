@@ -41,7 +41,9 @@ def fresh(tmp_path, monkeypatch):
 def test_reply_and_store():
     r = client.post("/chat", json={"text": "giá bao nhiêu"})
     assert r.status_code == 200
-    assert r.json()["reply"] == "Giá 100.000đ ạ."
+    reply = r.json()["reply"]
+    assert reply.startswith(f"Dạ em là trợ lý tự động của {bot.SHOP_NAME}.")
+    assert reply.endswith("Giá 100.000đ ạ.")
     with bot.db() as c:
         assert c.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 2
 
@@ -58,7 +60,7 @@ def test_llm_error_falls_back(monkeypatch):
         raise RuntimeError("llm down")
 
     monkeypatch.setattr(bot, "_chat_completion", boom)
-    assert bot.handle_message("p2", "chào") == bot.FALLBACK
+    assert bot.handle_message("p2", "chào").endswith(bot.FALLBACK)
 
 
 def test_paused_bot_stays_silent():
@@ -102,7 +104,9 @@ def test_webhook_signature_and_reply(monkeypatch):
     sig = "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
     r = client.post("/webhook", content=body, headers={"x-hub-signature-256": sig})
     assert r.status_code == 200
-    assert sent == [("psid-1", "Giá 100.000đ ạ.")]
+    assert len(sent) == 1
+    assert sent[0][0] == "psid-1"
+    assert sent[0][1].endswith("Giá 100.000đ ạ.")
 
 
 def test_webhook_bad_signature(monkeypatch):
@@ -119,3 +123,10 @@ def test_webhook_ignores_echo(monkeypatch):
     body = json.dumps(payload(echo=True)).encode()
     assert client.post("/webhook", content=body).status_code == 200
     assert sent == []
+
+
+def test_disclosure_only_on_first_message():
+    first = bot.handle_message("p4", "chào")
+    second = bot.handle_message("p4", "cảm ơn")
+    assert first.startswith("Dạ em là trợ lý tự động")
+    assert not second.startswith("Dạ em là trợ lý tự động")
