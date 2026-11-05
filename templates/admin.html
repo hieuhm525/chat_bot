@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quản lý câu trả lời</title>
+<style>
+  :root { --bg:#f0f2f5; --card:#fff; --text:#1c1e21; --muted:#65676b; --brand:#0866ff; --line:#e4e6eb; --bad:#b3261e; --ok:#1a7f37; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:860px; margin:0 auto; padding:24px 18px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 20px; font-size:13px; }
+  .card { background:var(--card); border-radius:12px; padding:18px;
+          box-shadow:0 1px 2px rgba(0,0,0,.08); margin-bottom:16px; }
+  label { display:block; font-size:13px; font-weight:600; margin:12px 0 6px; }
+  input, textarea { width:100%; border:1px solid #ccd0d5; border-radius:8px;
+                    padding:10px 12px; font:inherit; outline:none; }
+  input:focus, textarea:focus { border-color:var(--brand); }
+  textarea { min-height:110px; resize:vertical; }
+  button { border:0; border-radius:8px; padding:9px 16px; font:inherit;
+           cursor:pointer; background:var(--brand); color:#fff; }
+  button.ghost { background:#e4e6eb; color:var(--text); }
+  button.danger { background:#fde8e8; color:var(--bad); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  .item { border-top:1px solid var(--line); padding:14px 0; }
+  .item:first-child { border-top:0; }
+  .item h3 { font-size:15px; margin:0 0 4px; }
+  .item p { margin:0; color:var(--muted); white-space:pre-wrap; }
+  .empty { color:var(--muted); font-size:14px; }
+  #msg { min-height:22px; font-size:13px; margin-top:10px; }
+  #msg.err, #loginMsg { color:var(--bad); }
+  #msg.ok { color:var(--ok); }
+  #login { max-width:380px; margin:12vh auto 0; }
+  #testOut { margin-top:12px; white-space:pre-wrap; color:var(--muted); }
+  #testOut b { color:var(--text); }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <section id="login" class="card" hidden>
+    <h1>Quản lý câu trả lời</h1>
+    <p class="sub">Nhập mật khẩu quản trị để sửa nội dung bot trả lời.</p>
+    <label for="pw">Mật khẩu</label>
+    <input id="pw" type="password" autocomplete="current-password">
+    <div class="row"><button id="loginBtn">Đăng nhập</button></div>
+    <div id="loginMsg"></div>
+  </section>
+
+  <section id="app" hidden>
+    <h1>Quản lý câu trả lời</h1>
+    <p class="sub">Sửa ở đây là bot dùng ngay, không cần sửa code hay khởi động lại.</p>
+
+    <div class="card">
+      <label for="title">Tiêu đề (câu hỏi)</label>
+      <input id="title" maxlength="80" placeholder="Ví dụ: Giờ mở cửa">
+      <label for="body">Câu trả lời</label>
+      <textarea id="body" maxlength="2000" placeholder="Ví dụ: Thứ 2 – Thứ 7: 8:00 – 20:00"></textarea>
+      <div class="row">
+        <button id="save">Lưu</button>
+        <button id="cancel" class="ghost" hidden>Huỷ sửa</button>
+        <button id="logout" class="ghost" style="margin-left:auto">Đăng xuất</button>
+      </div>
+      <div id="msg"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 10px;font-size:15px">Danh sách</h3>
+      <div id="list"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 10px;font-size:15px">Thử câu hỏi</h3>
+      <div class="row" style="margin-top:0">
+        <input id="q" placeholder="Khách sẽ hỏi gì?" style="flex:1;min-width:200px">
+        <button id="test" class="ghost">Thử</button>
+      </div>
+      <div id="testOut"></div>
+    </div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let entries = [], editing = null;
+
+async function api(method, path, body, silent401 = false) {
+  const r = await fetch(path, {
+    method,
+    headers: body ? {'Content-Type': 'application/json'} : {},
+    body: body ? JSON.stringify(body) : undefined,
+    credentials: 'same-origin'
+  });
+  if (r.status === 401) {
+    const d = await r.json().catch(() => ({}));
+    if (!silent401) showLogin();
+    throw new Error(d.detail || 'Cần đăng nhập');
+  }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || 'Có lỗi xảy ra');
+  return d;
+}
+
+function showLogin() { $('login').hidden = false; $('app').hidden = true; }
+function showApp() { $('login').hidden = true; $('app').hidden = false; }
+
+function note(text, ok = true) {
+  const m = $('msg');
+  m.textContent = text;
+  m.className = ok ? 'ok' : 'err';
+  if (ok) setTimeout(() => { if (m.textContent === text) m.textContent = ''; }, 2500);
+}
+
+async function load() {
+  entries = await api('GET', '/admin/faq', null, true);
+  render();
+  showApp();
+}
+
+function render() {
+  const box = $('list');
+  box.innerHTML = '';
+  if (!entries.length) {
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = 'Chưa có mục nào. Thêm ở trên.';
+    box.append(p);
+    return;
+  }
+  for (const e of entries) {
+    const d = document.createElement('div'); d.className = 'item';
+    const h = document.createElement('h3'); h.textContent = e.title;
+    const p = document.createElement('p'); p.textContent = e.body;
+    const row = document.createElement('div'); row.className = 'row';
+    const edit = document.createElement('button'); edit.className = 'ghost'; edit.textContent = 'Sửa';
+    edit.onclick = () => startEdit(e);
+    const del = document.createElement('button'); del.className = 'danger'; del.textContent = 'Xoá';
+    del.onclick = () => remove(e);
+    row.append(edit, del);
+    d.append(h, p, row);
+    box.append(d);
+  }
+}
+
+function startEdit(e) {
+  editing = e.id;
+  $('title').value = e.title;
+  $('body').value = e.body;
+  $('cancel').hidden = false;
+  $('title').focus();
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+function reset() {
+  editing = null;
+  $('title').value = '';
+  $('body').value = '';
+  $('cancel').hidden = true;
+}
+
+async function save() {
+  const title = $('title').value.trim(), body = $('body').value.trim();
+  if (!title || !body) { note('Nhập đủ tiêu đề và câu trả lời', false); return; }
+  try {
+    await api('POST', '/admin/faq', {id: editing, title, body});
+    reset();
+    note('Đã lưu');
+    await load();
+  } catch (err) { note(err.message, false); }
+}
+
+async function remove(e) {
+  if (!confirm(`Xoá "${e.title}"?`)) return;
+  try {
+    await api('DELETE', '/admin/faq/' + e.id);
+    note('Đã xoá');
+    await load();
+  } catch (err) { note(err.message, false); }
+}
+
+async function test() {
+  const q = $('q').value.trim();
+  if (!q) return;
+  try {
+    const d = await api('POST', '/admin/test', {q});
+    $('testOut').textContent = d.answer
+      ? 'Khớp FAQ: ' + d.answer
+      : 'Không khớp mục nào — bot sẽ nhờ AI trả lời dựa trên toàn bộ FAQ.';
+  } catch (err) { $('testOut').textContent = err.message; }
+}
+
+$('loginBtn').onclick = async () => {
+  $('loginMsg').textContent = '';
+  try {
+    await api('POST', '/admin/login', {password: $('pw').value}, true);
+    $('pw').value = '';
+    await load();
+  } catch (err) { $('loginMsg').textContent = err.message; }
+};
+$('pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+
+$('save').onclick = save;
+$('cancel').onclick = reset;
+$('logout').onclick = async () => { await api('POST', '/admin/logout', {}); showLogin(); };
+$('test').onclick = test;
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') test(); });
+
+load().catch(() => showLogin());
+</script>
+</body>
+</html>

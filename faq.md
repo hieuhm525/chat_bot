@@ -1,4 +1,4 @@
-# FAQ — sửa file này, bot trả lời theo đúng nội dung ở đây
+# FAQ mẫu — chỉ dùng để seed lần đầu; sau đó sửa trong /admin
 
 ## Giờ mở cửa
 - Thứ 2 – Thứ 7: 8:00 – 20:00

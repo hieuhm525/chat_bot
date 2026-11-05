@@ -7,10 +7,10 @@
 <style>
   :root { --bg:#f0f2f5; --card:#fff; --text:#1c1e21; --muted:#65676b; --brand:#0866ff; }
   * { box-sizing:border-box; }
-  body { margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+  body { margin:0; min-height:100dvh; background:var(--bg); color:var(--text);
          font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
          display:flex; justify-content:center; }
-  .wrap { width:100%; max-width:640px; height:100vh; display:flex; flex-direction:column; }
+  .wrap { width:100%; max-width:640px; height:100dvh; display:flex; flex-direction:column; }
   header { display:flex; align-items:center; gap:10px; padding:14px 18px;
            background:var(--card); border-bottom:1px solid #e4e6eb; }
   .avatar { width:36px; height:36px; border-radius:50%; background:var(--brand);
@@ -47,7 +47,7 @@
     <div><b>Trợ lý CSKH</b><small>Đang hoạt động</small></div>
     <button id="reset" type="button">Cuộc trò chuyện mới</button>
   </header>
-  <div id="log"></div>
+  <div id="log" role="log" aria-live="polite" aria-label="Cuộc trò chuyện"></div>
   <form id="form">
     <input id="input" autocomplete="off" placeholder="Nhập tin nhắn…" maxlength="1000">
     <button id="send" type="submit" aria-label="Gửi">➤</button>
@@ -104,6 +104,7 @@ form.addEventListener('submit', async (e) => {
 });
 
 document.getElementById('reset').addEventListener('click', async () => {
+  if (!confirm('Xoá toàn bộ cuộc trò chuyện này?')) return;
   await fetch('/chat', {method: 'DELETE'});
   log.innerHTML = '';
   add('bot', 'Dạ em có thể giúp gì cho anh/chị ạ?');
