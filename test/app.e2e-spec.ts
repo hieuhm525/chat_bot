@@ -16,8 +16,9 @@ import { OutboxWorker } from '../src/modules/messaging/outbox.worker';
 import { decryptCredential } from '../src/common/crypto';
 import { DEFAULT_SYSTEM_PROMPT } from '../src/common/bot-defaults';
 
-const ADMIN_URL = 'postgres://postgres:postgres@127.0.0.1:5433/postgres';
-const TEST_URL = 'postgres://postgres:postgres@127.0.0.1:5433/bv_agent_msg_test';
+const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5433/postgres';
+const TEST_URL =
+  process.env.TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5433/bv_agent_msg_test';
 
 function payload(text: string, mid: string, sender = 'psid-1', pageId = 'PAGE1') {
   return {
@@ -124,9 +125,12 @@ describe('bv-agent-msg e2e', () => {
   beforeAll(async () => {
     const admin = new Client({ connectionString: ADMIN_URL });
     await admin.connect();
-    await admin.query('DROP DATABASE IF EXISTS bv_agent_msg_test WITH (FORCE)');
-    await admin.query('CREATE DATABASE bv_agent_msg_test');
-    await admin.end();
+    try {
+      await admin.query('DROP DATABASE IF EXISTS bv_agent_msg_test WITH (FORCE)');
+      await admin.query('CREATE DATABASE bv_agent_msg_test');
+    } finally {
+      await admin.end();
+    }
 
     const pool = new Pool({ connectionString: TEST_URL });
     await migrate(drizzle(pool), { migrationsFolder: 'src/db/migrations' });
@@ -235,10 +239,11 @@ describe('bv-agent-msg e2e', () => {
   });
 
   afterAll(async () => {
-    if (app) {
-      await app.get(PG_POOL).end();
-      await app.close();
-    }
+    if (!app) return;
+    const pool = app.get<Pool>(PG_POOL);
+    jest.restoreAllMocks();
+    await app.close();
+    await pool.end();
   });
 
   it('serves health and the webhook challenge', async () => {
@@ -1442,6 +1447,212 @@ describe('bv-agent-msg e2e', () => {
         .from(conversations)
         .where(inArray(conversations.workspaceId, [wsA.id, wsB.id]));
       expect(rows).toHaveLength(0);
+    });
+
+    it('treats from/to days as workspace-local days', async () => {
+      const [channel] = await db
+        .insert(channels)
+        .values({ workspaceId, provider: 'messenger', name: 'Kênh giờ VN', externalId: 'PAGE-TZ', botId })
+        .returning();
+      const [customer] = await db
+        .insert(customers)
+        .values({ workspaceId, channelId: channel.id, externalUserId: 'step5-tz', displayName: 'Khách TZ' })
+        .returning();
+      // 06:00 on 11/01 in Vietnam, still 10/01 in UTC.
+      const [conversation] = await db
+        .insert(conversations)
+        .values({
+          workspaceId,
+          channelId: channel.id,
+          customerId: customer.id,
+          externalThreadId: 'psid-step5-tz',
+          lastMessageAt: new Date('2026-01-10T23:00:00Z'),
+        })
+        .returning();
+
+      expect(await listIds(`channelId=${channel.id}&from=2026-01-11&to=2026-01-11`)).toEqual([conversation.id]);
+      expect(await listIds(`channelId=${channel.id}&from=2026-01-10&to=2026-01-10`)).toEqual([]);
+      expect(await listIds(`channelId=${channel.id}&to=2026-01-10`)).toEqual([]);
+    });
+  });
+
+  describe('tenant isolation and admin visibility (step 6)', () => {
+    const SECRET_TENANT_CONTENT = 'BÍ-MẬT-NỘI-DUNG-TIN';
+    const SECRET_CUSTOMER = 'BÍ-MẬT-TÊN-KHÁCH';
+    const SECRET_PROMPT = 'BÍ-MẬT-SYSTEM-PROMPT';
+    const SECRET_KEY_PART = 'LEAK-ME';
+
+    let workspaceB = '';
+    let userBId = '';
+    let botBId = '';
+    let ruleBId = '';
+    let channelBId = '';
+    let conversationBId = '';
+
+    beforeAll(async () => {
+      const tenant = await adminAgent
+        .post('/api/v1/tenants')
+        .send({ name: 'Shop B', username: 'ownerb', password: 'password12345', maxBots: 10, maxChannels: 10 })
+        .expect(201);
+      workspaceB = tenant.body.id;
+
+      const [userB] = await db.select().from(users).where(eq(users.username, 'ownerb'));
+      userBId = userB.id;
+      const [botB] = await db.select().from(bots).where(eq(bots.workspaceId, workspaceB));
+      botBId = botB.id;
+      await db.update(bots).set({ systemPrompt: SECRET_PROMPT }).where(eq(bots.id, botB.id));
+
+      const [ruleB] = await db
+        .insert(botRules)
+        .values({ botId: botB.id, name: 'Rule B', keywords: ['riêng tư'], answer: 'b', createdBy: userB.id })
+        .returning();
+      ruleBId = ruleB.id;
+
+      const [channelB] = await db
+        .insert(channels)
+        .values({
+          workspaceId: workspaceB,
+          provider: 'messenger',
+          name: 'Kênh B',
+          externalId: 'PAGE-B',
+          botId: botB.id,
+        })
+        .returning();
+      channelBId = channelB.id;
+
+      const [customerB] = await db
+        .insert(customers)
+        .values({
+          workspaceId: workspaceB,
+          channelId: channelB.id,
+          externalUserId: 'cust-b',
+          displayName: SECRET_CUSTOMER,
+        })
+        .returning();
+      const [conversationB] = await db
+        .insert(conversations)
+        .values({
+          workspaceId: workspaceB,
+          channelId: channelB.id,
+          customerId: customerB.id,
+          externalThreadId: 'thread-b',
+          botId: botB.id,
+        })
+        .returning();
+      conversationBId = conversationB.id;
+      await db.insert(messages).values({
+        workspaceId: workspaceB,
+        channelId: channelB.id,
+        conversationId: conversationB.id,
+        direction: 'in',
+        senderType: 'customer',
+        content: SECRET_TENANT_CONTENT,
+        status: 'received',
+      });
+    });
+
+    // A new tenant route with an id parameter must get a sample here, so nobody forgets isolation.
+    const tenantPathWithB = (path: string): string | undefined => {
+      const samples: Record<string, string> = {
+        '/api/v1/bots/:botId': `/api/v1/bots/${botBId}`,
+        '/api/v1/bots/:botId/rules': `/api/v1/bots/${botBId}/rules`,
+        '/api/v1/bots/:botId/rules/:id': `/api/v1/bots/${botBId}/rules/${ruleBId}`,
+        '/api/v1/channels/:id': `/api/v1/channels/${channelBId}`,
+        '/api/v1/channels/:id/test': `/api/v1/channels/${channelBId}/test`,
+        '/api/v1/members/:id': `/api/v1/members/${userBId}`,
+        '/api/v1/members/:id/password': `/api/v1/members/${userBId}/password`,
+        '/api/v1/conversations/:id': `/api/v1/conversations/${conversationBId}`,
+        '/api/v1/conversations/:id/messages': `/api/v1/conversations/${conversationBId}/messages`,
+        '/api/v1/conversations/:id/takeover': `/api/v1/conversations/${conversationBId}/takeover`,
+        '/api/v1/conversations/:id/release': `/api/v1/conversations/${conversationBId}/release`,
+      };
+      return samples[path];
+    };
+
+    const bodyFor = (path: string) => {
+      if (path.endsWith('/messages')) return { content: 'xin chào' };
+      if (path.endsWith('/password')) return { password: 'password123' };
+      if (path.endsWith('/rules')) return { name: 'Rule mới', keywords: ['a b'], answer: 'a' };
+      return {};
+    };
+
+    it('returns 404 for another tenant on every id route', async () => {
+      const server: any = app.getHttpAdapter().getInstance();
+      const stack = server.router?.stack ?? server._router?.stack ?? [];
+      const methods = ['get', 'post', 'patch', 'delete'];
+      const routes: Array<{ method: string; path: string }> = [];
+      for (const layer of stack) {
+        if (!layer.route) continue;
+        const path = String(layer.route.path);
+        if (path.includes('*') || path.includes('{')) continue;
+        if (!path.startsWith('/api/v1/')) continue;
+        if (
+          path.startsWith('/api/v1/tenants') ||
+          path.startsWith('/api/v1/llm-providers') ||
+          path.startsWith('/api/v1/auth') ||
+          path.startsWith('/api/v1/setup') ||
+          path === '/api/v1/customers'
+        ) {
+          continue;
+        }
+        for (const method of Object.keys(layer.route.methods)) {
+          if (methods.includes(method)) routes.push({ method, path });
+        }
+      }
+      expect(routes.length).toBeGreaterThan(10);
+
+      for (const route of routes) {
+        const label = `${route.method.toUpperCase()} ${route.path}`;
+        const url = route.path.includes(':') ? tenantPathWithB(route.path) : route.path;
+        // Missing sample data fails loudly instead of silently skipping a new route.
+        expect({ route: label, hasSample: Boolean(url) }).toEqual({ route: label, hasSample: true });
+        if (!url) continue;
+
+        const denied = await (adminAgent as any)[route.method](url);
+        expect({ route: label, adminStatus: denied.status }).toEqual({ route: label, adminStatus: 403 });
+
+        if (!route.path.includes(':')) continue;
+        const res = await (agent as any)[route.method](url).send(bodyFor(route.path));
+        expect({ route: label, ownerStatus: res.status }).toEqual({ route: label, ownerStatus: 404 });
+      }
+
+      // Tenant A's lists never contain anything from tenant B.
+      const botsA = await agent.get('/api/v1/bots').expect(200);
+      expect(botsA.body.items.map((b: { id: string }) => b.id)).not.toContain(botBId);
+      const channelsA = await agent.get('/api/v1/channels').expect(200);
+      expect(channelsA.body.items.map((c: { id: string }) => c.id)).not.toContain(channelBId);
+      const membersA = await agent.get('/api/v1/members').expect(200);
+      expect(membersA.body.map((m: { id: string }) => m.id)).not.toContain(userBId);
+      const conversationsA = await agent.get('/api/v1/conversations?limit=100').expect(200);
+      expect(conversationsA.body.items.map((c: { id: string }) => c.id)).not.toContain(conversationBId);
+      const rulesA = await agent.get(`/api/v1/bots/${botId}/rules`).expect(200);
+      expect(rulesA.body.map((r: { id: string }) => r.id)).not.toContain(ruleBId);
+    });
+
+    it('never exposes tenant content or provider keys through admin APIs', async () => {
+      const provider = await adminAgent
+        .post('/api/v1/llm-providers')
+        .send({
+          name: 'leak-check',
+          baseUrl: 'https://leak.example/v1',
+          model: 'leak-model',
+          apiKey: `sk-admin-${SECRET_KEY_PART}-9999`,
+          priority: 1,
+        })
+        .expect(201);
+      const adminResponses = [
+        await adminAgent.get('/api/v1/tenants').expect(200),
+        await adminAgent.get('/api/v1/llm-providers').expect(200),
+        await adminAgent.patch(`/api/v1/llm-providers/${provider.body.id}`).send({ name: 'leak-check-2' }).expect(200),
+      ];
+      for (const res of adminResponses) {
+        const text = JSON.stringify(res.body);
+        expect(text).not.toContain(SECRET_TENANT_CONTENT);
+        expect(text).not.toContain(SECRET_CUSTOMER);
+        expect(text).not.toContain(SECRET_PROMPT);
+        expect(text).not.toContain(SECRET_KEY_PART);
+      }
+      await adminAgent.delete(`/api/v1/llm-providers/${provider.body.id}`).expect(200);
     });
   });
 });

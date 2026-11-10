@@ -146,14 +146,7 @@ Cần làm:
 
 ## Bước 5. Màn hình conversation cho tenant — ĐÃ XONG
 
-Đã làm: `GET /conversations` lọc theo kênh, agent, mode, người tiếp quản, khoảng ngày; tìm theo tên khách, external id và nội dung message (escape `%`/`_`, chỉ trong workspace), migration `0011` bật `pg_trgm` và GIN index trên `messages.content`. Cursor `(last_message_at, id)` mã hoá base64url, `limit` mặc định 30 tối đa 100, cursor sai trả 400. Mỗi dòng có tên kênh, tên agent, người tiếp quản, đoạn trích tin cuối. `GET /conversations/options` cho bộ lọc. Message trả `senderName` (Khách, tên bot, username, Page Inbox, Hệ thống), `status`, `errorCode`, `metadata`. Webhook vào kênh disabled chỉ khi có đúng một kênh khớp. UI `/app/conversations` có bộ lọc, tải thêm và chi tiết metadata. Build, 16 unit test, 32 e2e test đều qua.
-
-Còn lại (nhỏ, làm cùng bước 6):
-- Lọc `from`/`to` dạng `YYYY-MM-DD` đang tính theo UTC, trong khi workspace có `timezone` (mặc định `Asia/Ho_Chi_Minh`). Tin lúc 06:00 sáng giờ Việt Nam bị tính vào ngày hôm trước. Cần đổi ngày sang khoảng thời gian theo timezone của workspace.
-
-<details><summary>Yêu cầu gốc của bước 5</summary>
-
-Đã làm: `GET /conversations` (owner, agent) lọc theo `channelId`, `botId`, `mode`, `assignedUserId`, `from`/`to` trên `last_message_at`; id ngoài workspace trả danh sách rỗng. `search` khớp tên khách, `external_user_id` và nội dung tin trong workspace, escape `%`/`_`, migration `0011` bật `pg_trgm` và GIN trgm trên `messages.content`. Cursor base64 từ `(last_message_at, id)`, sort `last_message_at DESC NULLS LAST, id DESC`, cursor sai trả 400, limit mặc định 30 / tối đa 100. Mỗi dòng trả tên kênh, tên AI agent, người tiếp quản, đoạn trích tin cuối. `GET /conversations/:id/messages` trả `senderType`, tên người gửi (bot, nhân viên, `Page Inbox`, `Hệ thống`), `status`, `errorCode`, `metadata`. Thêm `GET /conversations/options` cho bộ lọc của agent. UI `/app/conversations`: thanh lọc, ô tìm kiếm, cuộn tải thêm theo cursor, màu theo loại người gửi, lý do failed/blocked, bấm tin bot mở metadata. Webhook chỉ dùng kênh disabled khi có đúng một kênh khớp, nhiều hơn thì bỏ qua và log cảnh báo. Build, 16 unit test, 32 e2e test đều qua.
+Đã làm: `GET /conversations` lọc theo kênh, agent, mode, người tiếp quản, khoảng ngày; tìm theo tên khách, external id và nội dung message (escape `%`/`_`, chỉ trong workspace), migration `0011` bật `pg_trgm` và GIN index trên `messages.content`. Cursor `(last_message_at, id)` mã hoá base64url, `limit` mặc định 30 tối đa 100, cursor sai trả 400. Mỗi dòng có tên kênh, tên agent, người tiếp quản, đoạn trích tin cuối. `GET /conversations/options` cho bộ lọc. Message trả `senderName` (Khách, tên bot, username, Page Inbox, Hệ thống), `status`, `errorCode`, `metadata`. Webhook vào kênh disabled chỉ khi có đúng một kênh khớp. UI `/app/conversations` có bộ lọc, tải thêm và chi tiết metadata. Lọc `from`/`to` dạng `YYYY-MM-DD` tính theo `workspaces.timezone` (bước 6). Build, 16 unit test, 35 e2e test đều qua.
 
 <details><summary>Yêu cầu gốc của bước 5</summary>
 
@@ -164,14 +157,18 @@ Còn lại (nhỏ, làm cùng bước 6):
 
 </details>
 
-</details>
+## Bước 6. Test và CI — ĐÃ XONG
 
-## Bước 6. Test và CI
+Đã làm: `from`/`to` dạng `YYYY-MM-DD` tính theo `workspaces.timezone` bằng `AT TIME ZONE` (không thêm thư viện ngày). E2E đọc `TEST_DATABASE_URL` / `TEST_ADMIN_DATABASE_URL`, `afterAll` đóng app + pool nên Jest thoát sạch, không cần `--forceExit`. Test cách ly đọc route từ router: mọi route tenant có tham số id gọi bằng id tenant B → 404 (route mới thiếu mẫu dữ liệu thì fail), admin gọi route tenant → 403, danh sách của A không chứa id của B. Test admin không thấy nội dung tin, tên khách, system prompt hay phần thân API key qua `/tenants` và `/llm-providers`. CI `.github/workflows/ci.yml` chạy Node 24 + pnpm + service Postgres 18: typecheck, build, admin build, unit, e2e, và kiểm tra `drizzle-kit generate` không sinh migration mới. README có cách chạy test local và biến môi trường cho CI. 35 e2e test, 16 unit test đều qua.
+
+<details><summary>Yêu cầu gốc của bước 6</summary>
 
 - Test cách ly: user tenant A gọi mọi endpoint có `:id` với id của tenant B → 404. Danh sách của A không chứa dữ liệu của B.
 - Test admin không đọc được message.
 - Test giới hạn gói và tenant bị khóa.
 - Các test trên chạy trong `pnpm test:e2e` và CI.
+
+</details>
 
 ## Ngoài phạm vi
 Thanh toán, hoá đơn, RAG, workflow builder, broadcast, đa ngôn ngữ. Không thêm Redis hay microservice.

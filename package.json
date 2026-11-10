@@ -2,6 +2,7 @@
   "name": "bv-agent-msg",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.10.0",
   "description": "Multi-channel customer support bot (Messenger/Zalo/WhatsApp) with NestJS",
   "scripts": {
     "build": "nest build",

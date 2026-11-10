@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, desc, eq, gte, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { DRIZZLE, Db } from '../../db/db.module';
-import { bots, channels, conversations, customers, messages, outbox, users } from '../../db/schema';
+import { bots, channels, conversations, customers, messages, outbox, users, workspaces } from '../../db/schema';
 import { writeMessage } from './message-writer';
 
 export interface ListQuery {
@@ -45,13 +45,7 @@ function decodeCursor(cursor: string): ListCursor {
   }
 }
 
-function parseFrom(value: string) {
-  return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : value);
-}
-
-function parseTo(value: string) {
-  return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59.999Z` : value);
-}
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 @Injectable()
 export class ConversationsService {
@@ -64,8 +58,24 @@ export class ConversationsService {
     if (query.botId) filters.push(eq(conversations.botId, query.botId));
     if (query.mode) filters.push(eq(conversations.mode, query.mode));
     if (query.assignedUserId) filters.push(eq(conversations.assignedUserId, query.assignedUserId));
-    if (query.from) filters.push(gte(conversations.lastMessageAt, parseFrom(query.from)));
-    if (query.to) filters.push(lte(conversations.lastMessageAt, parseTo(query.to)));
+
+    // A YYYY-MM-DD bound is a whole day in the tenant's timezone, not UTC.
+    const dateOnly = [query.from, query.to].some((value) => value && DATE_ONLY_RE.test(value));
+    const timezone = dateOnly ? await this.workspaceTimezone(workspaceId) : '';
+    if (query.from) {
+      filters.push(
+        DATE_ONLY_RE.test(query.from)
+          ? sql`${conversations.lastMessageAt} >= (${query.from}::date::timestamp AT TIME ZONE ${timezone})`
+          : gte(conversations.lastMessageAt, new Date(query.from)),
+      );
+    }
+    if (query.to) {
+      filters.push(
+        DATE_ONLY_RE.test(query.to)
+          ? sql`${conversations.lastMessageAt} < ((${query.to}::date + 1)::timestamp AT TIME ZONE ${timezone})`
+          : lte(conversations.lastMessageAt, new Date(query.to)),
+      );
+    }
 
     if (query.search) {
       // User input is a literal: escape LIKE metacharacters instead of treating them as wildcards.
@@ -344,6 +354,15 @@ export class ConversationsService {
   private async username(tx: Db, userId: string) {
     const [user] = await tx.select({ username: users.username }).from(users).where(eq(users.id, userId)).limit(1);
     return user?.username ?? 'Nhân viên';
+  }
+
+  private async workspaceTimezone(workspaceId: string) {
+    const [row] = await this.db
+      .select({ timezone: workspaces.timezone })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    return row?.timezone ?? 'Asia/Ho_Chi_Minh';
   }
 
   private async getConversation(workspaceId: string, id: string) {

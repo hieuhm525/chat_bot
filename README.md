@@ -99,12 +99,21 @@ Mỗi tenant có nhiều AI agent. Kênh phải chọn `botId` và bot phải th
 ## Test
 
 ```bash
+pnpm typecheck     # tsc --noEmit, gồm cả e2e
 pnpm test          # unit: normalize, matcher, crypto, canSend
-pnpm test:e2e  # e2e: webhook, dedupe, rule reply, takeover, cross-tenant
+pnpm test:e2e      # e2e: webhook, hội thoại, phân quyền, cách ly tenant
 ```
 
-E2E tự tạo DB `bv_agent_msg_test` trên Postgres của `docker compose` (port 5433).
-Không mock DB; test cô lập tenant chạy cùng suite.
+E2E tự tạo DB `bv_agent_msg_test` trên Postgres của `docker compose` (port 5433) và chạy toàn bộ migration. Không mock DB.
+
+Muốn trỏ vào Postgres khác (ví dụ CI), đặt trước khi chạy:
+
+```bash
+export TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/bv_agent_msg_test
+export TEST_ADMIN_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres
+```
+
+CI (`.github/workflows/ci.yml`) chạy trên mọi push và pull request: Node 24 + pnpm, service `postgres:18-alpine`, rồi `pnpm install --frozen-lockfile`, `typecheck`, `build`, `admin:build`, `test`, `test:e2e`. Bước cuối chạy `drizzle-kit generate` và fail nếu schema và migration lệch nhau.
 
 ## Trạng thái theo phase
 
