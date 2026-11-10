@@ -1,7 +1,7 @@
-.venv/
+node_modules/
+dist/
+public/admin/
 .env
-chat.db
-__pycache__/
-*.pyc
-.pytest_cache/
-.env.bak.*
+*.log
+.DS_Store
+coverage/

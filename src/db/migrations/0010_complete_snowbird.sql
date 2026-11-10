@@ -1,0 +1,3 @@
+UPDATE "bots" SET "system_prompt" = 'Bạn là nhân viên chăm sóc khách hàng thân thiện. Trả lời bằng tiếng Việt, tối đa 3 câu, xưng "em" và gọi khách là "anh/chị".' WHERE "system_prompt" = '';--> statement-breakpoint
+ALTER TABLE "bots" ALTER COLUMN "system_prompt" SET DEFAULT 'Bạn là nhân viên chăm sóc khách hàng thân thiện. Trả lời bằng tiếng Việt, tối đa 3 câu, xưng "em" và gọi khách là "anh/chị".';--> statement-breakpoint
+CREATE UNIQUE INDEX "channels_provider_external_active_uq" ON "channels" USING btree ("provider","external_id") WHERE "channels"."status" <> 'disabled';
