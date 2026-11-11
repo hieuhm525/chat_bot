@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useDialogs } from '@/components/dialogs';
 import { Field, LoadError, Loading, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';
+import { IconAction } from '@/components/icon-action';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -280,15 +281,13 @@ export function Channels() {
                       <PlugZap />
                       Kiểm tra
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
+                    <IconAction
                       className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                       onClick={() => remove(c)}
-                      title="Xoá" aria-label="Xoá"
+                      label={`Xoá kênh ${c.name}`} tooltip="Xoá"
                     >
                       <Trash2 />
-                    </Button>
+                    </IconAction>
                   </div>
                 </TableCell>
               </TableRow>
@@ -614,17 +613,15 @@ function MenuDialog(props: { channel: Channel | null; onClose: () => void; onSav
                     onChange={(e) => update(index, { url: e.target.value })}
                   />
                 </Field>
-                <Button
+                <IconAction
                   type="button"
-                  variant="ghost"
-                  size="icon-sm"
                   className="row-start-1 mt-0.5 sm:row-start-auto"
                   onClick={() => setItems(items.filter((_, i) => i !== index))}
-                  title="Xoá mục"
-                  aria-label={`Xoá mục ${index + 1}`}
+                  label={`Xoá mục ${index + 1}${item.title ? ` (${item.title})` : ''}`}
+                  tooltip="Xoá mục"
                 >
                   <X />
-                </Button>
+                </IconAction>
               </div>
             ))}
             <div>
@@ -678,16 +675,9 @@ function Copy({ value, short }: { value: string; short?: boolean }) {
       >
         {value}
       </code>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon-sm"
-        onClick={copy}
-        title={copied ? 'Đã copy' : 'Copy'}
-        aria-label={copied ? 'Đã copy' : 'Copy'}
-      >
+      <IconAction type="button" variant="outline" onClick={copy} label={copied ? 'Đã copy' : 'Copy'}>
         {copied ? <Check className="text-success" /> : <CopyIcon />}
-      </Button>
+      </IconAction>
     </div>
   );
 }

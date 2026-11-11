@@ -267,6 +267,12 @@ export function App() {
 
   return (
     <div className="flex h-dvh flex-col md:h-auto md:min-h-screen md:flex-row">
+      <a
+        href="#main"
+        className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground no-underline focus:not-sr-only focus:fixed focus:top-3 focus:left-3 hover:no-underline"
+      >
+        Bỏ qua tới nội dung chính
+      </a>
       {/* Mobile: top bar with a drawer for navigation. */}
       <header className="flex shrink-0 items-center justify-between gap-2 border-b bg-sidebar px-3 py-2 text-sidebar-foreground md:hidden">
         <div className="flex items-center gap-1">
@@ -305,7 +311,7 @@ export function App() {
         </div>
       </aside>
 
-      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto md:overflow-visible">
+      <main id="main" tabIndex={-1} className="min-h-0 min-w-0 flex-1 overflow-y-auto outline-none md:overflow-visible">
         <RouteErrorBoundary resetKey={location.pathname}>
           <Suspense fallback={<Loading />}>
             {area === 'admin' ? (

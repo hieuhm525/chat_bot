@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { cloneElement, isValidElement, useId, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
@@ -51,6 +51,14 @@ export function Notices({ error, notice }: { error?: string; notice?: string }) 
   );
 }
 
+interface ControlAria {
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean | 'true' | 'false';
+}
+
+/** Id of the hint/error text under a `Field`, for controls that set `aria-describedby` by hand. */
+export const fieldMessageId = (controlId: string) => `${controlId}-msg`;
+
 export function Field(props: {
   label: ReactNode;
   hint?: ReactNode;
@@ -60,16 +68,35 @@ export function Field(props: {
   className?: string;
   children: ReactNode;
 }) {
+  const autoId = useId();
+  const msgId = fieldMessageId(props.htmlFor ?? autoId);
+  const hasMessage = Boolean(props.error || props.hint);
+
+  // Link the hint/error to a single control so screen readers announce it on focus, not only when it appears.
+  // Multi-child fields (control + extra content) wire `fieldMessageId(htmlFor)` themselves.
+  let control = props.children;
+  if (isValidElement<ControlAria>(control)) {
+    const own = control.props;
+    control = cloneElement(control, {
+      'aria-describedby': [own['aria-describedby'], hasMessage ? msgId : undefined].filter(Boolean).join(' ') || undefined,
+      'aria-invalid': props.error ? true : own['aria-invalid'],
+    });
+  }
+
   return (
     <div className={cn('grid content-start gap-2', props.className)}>
       <Label htmlFor={props.htmlFor}>{props.label}</Label>
-      {props.children}
+      {control}
       {props.error ? (
-        <p className="text-xs text-destructive" role="alert">
+        <p id={msgId} className="text-xs text-destructive" role="alert">
           {props.error}
         </p>
       ) : (
-        props.hint && <p className="text-xs text-muted-foreground">{props.hint}</p>
+        props.hint && (
+          <p id={msgId} className="text-xs text-muted-foreground">
+            {props.hint}
+          </p>
+        )
       )}
     </div>
   );

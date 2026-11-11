@@ -4,6 +4,7 @@ import { api } from '../../api';
 import { useDialogs } from '@/components/dialogs';
 import { Field, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';
+import { IconAction } from '@/components/icon-action';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -316,12 +317,14 @@ export function Tenants() {
             <TableRow>
               <TableHead>Shop</TableHead>
               <TableHead>Trạng thái</TableHead>
-              <TableHead>Gói</TableHead>
+              <TableHead className="hidden md:table-cell">Gói</TableHead>
               <TableHead>Hết hạn</TableHead>
-              <TableHead>Bot / Kênh</TableHead>
-              <TableHead>Hội thoại / Tin tháng</TableHead>
-              <TableHead>Ngày tạo</TableHead>
-              <TableHead />
+              <TableHead className="hidden md:table-cell">Bot / Kênh</TableHead>
+              <TableHead className="hidden md:table-cell">Hội thoại / Tin tháng</TableHead>
+              <TableHead className="hidden md:table-cell">Ngày tạo</TableHead>
+              <TableHead>
+                <span className="sr-only">Thao tác</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -336,48 +339,44 @@ export function Tenants() {
                     {statusLabel[t.status] ?? t.status}
                   </Badge>
                 </TableCell>
-                <TableCell>{t.plan}</TableCell>
+                <TableCell className="hidden md:table-cell">{t.plan}</TableCell>
                 <TableCell className="whitespace-nowrap">
                   {t.expiresAt ? new Date(t.expiresAt).toLocaleDateString('vi-VN') : '—'}
                 </TableCell>
-                <TableCell className="whitespace-nowrap tabular-nums">
+                <TableCell className="hidden md:table-cell whitespace-nowrap tabular-nums">
                   {t.bots}/{t.maxBots} · {t.channels}/{t.maxChannels}
                 </TableCell>
-                <TableCell className="tabular-nums">
+                <TableCell className="hidden md:table-cell tabular-nums">
                   {t.conversations} / {t.messagesThisMonth}
                 </TableCell>
-                <TableCell className="whitespace-nowrap text-muted-foreground">
+                <TableCell className="hidden md:table-cell whitespace-nowrap text-muted-foreground">
                   {new Date(t.createdAt).toLocaleDateString('vi-VN')}
                 </TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon-sm" onClick={() => edit(t)} title="Sửa" aria-label="Sửa">
+                    <IconAction onClick={() => edit(t)} label={`Sửa tenant ${t.name}`} tooltip="Sửa">
                       <Pencil />
-                    </Button>
+                    </IconAction>
                     {t.status === 'suspended' ? (
-                      <Button variant="ghost" size="icon-sm" onClick={() => setStatus(t, 'resume')} title="Mở lại" aria-label="Mở lại">
+                      <IconAction onClick={() => setStatus(t, 'resume')} label={`Mở lại tenant ${t.name}`} tooltip="Mở lại">
                         <LockOpen />
-                      </Button>
+                      </IconAction>
                     ) : (
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
+                      <IconAction
                         className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                         onClick={() => setStatus(t, 'suspend')}
-                        title="Khóa" aria-label="Khóa"
+                        label={`Khóa tenant ${t.name}`} tooltip="Khóa"
                       >
                         <Lock />
-                      </Button>
+                      </IconAction>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
+                    <IconAction
                       className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                       onClick={() => resetPassword(t)}
-                      title="Đặt lại mật khẩu" aria-label="Đặt lại mật khẩu"
+                      label={`Đặt lại mật khẩu cho ${t.name}`} tooltip="Đặt lại mật khẩu"
                     >
                       <KeyRound />
-                    </Button>
+                    </IconAction>
                   </div>
                 </TableCell>
               </TableRow>
