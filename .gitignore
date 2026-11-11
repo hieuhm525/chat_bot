@@ -5,3 +5,10 @@ public/admin/
 *.log
 .DS_Store
 coverage/
+
+# Cấu hình công cụ cá nhân trên máy (AI agent, docker override): không commit
+.codex/
+.impeccable/config.local.json
+.impeccable/hook.cache.json
+.impeccable/hook.pending.json
+docker-compose.override.yml
