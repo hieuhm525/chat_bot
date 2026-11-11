@@ -5,6 +5,7 @@ import { api } from '../../api';
 import { useDialogs } from '@/components/dialogs';
 import { Field, LoadError, Loading, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';
+import { IconAction } from '@/components/icon-action';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -134,15 +135,13 @@ export function Bots() {
                         Cấu hình
                       </Link>
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
+                    <IconAction
                       className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                       onClick={() => remove(bot)}
-                      title="Xoá" aria-label="Xoá"
+                      label={`Xoá AI agent ${bot.name}`} tooltip="Xoá"
                     >
                       <Trash2 />
-                    </Button>
+                    </IconAction>
                   </div>
                 </TableCell>
               </TableRow>

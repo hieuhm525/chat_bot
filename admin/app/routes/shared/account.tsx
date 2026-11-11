@@ -1,14 +1,17 @@
 import { FormEvent, useState } from 'react';
-import { Check, Loader2, LogOut, X } from 'lucide-react';
+import { Check, Loader2, LogOut, Monitor, Moon, Sun, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, ApiError } from '../../api';
 import type { User } from '../../App';
 import { useDialogs } from '@/components/dialogs';
-import { Field, Page, PageHeader, Section } from '@/components/page';
+import { Field, fieldMessageId, Page, PageHeader, Section } from '@/components/page';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { PasswordInput } from '@/components/password-input';
+import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { initials, ROLE_LABEL } from '@/lib/user';
 
@@ -90,7 +93,7 @@ function ChangePasswordForm() {
           autoComplete="new-password"
           required
           aria-invalid={Boolean(errors.newPassword) || undefined}
-          aria-describedby="new-password-rules"
+          aria-describedby={`new-password-rules ${fieldMessageId('new-password')}`}
         />
         <ul id="new-password-rules" className="grid gap-1 text-xs" aria-label="Yêu cầu mật khẩu">
           {PASSWORD_CHECKS.map((c) => {
@@ -158,6 +161,36 @@ function SessionsCard() {
   );
 }
 
+const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: typeof Sun }> = [
+  { value: 'light', label: 'Sáng', icon: Sun },
+  { value: 'dark', label: 'Tối', icon: Moon },
+  { value: 'system', label: 'Theo hệ thống', icon: Monitor },
+];
+
+function ThemePicker() {
+  const { theme } = useTheme();
+  return (
+    <RadioGroup
+      aria-label="Giao diện"
+      value={theme}
+      onValueChange={(value) => setTheme(value as Theme)}
+      className="grid-cols-1 sm:grid-cols-3"
+    >
+      {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+        <Label
+          key={value}
+          htmlFor={`theme-${value}`}
+          className="flex cursor-pointer items-center gap-3 rounded-lg border bg-card px-4 py-3 font-normal transition-colors hover:bg-muted/60 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-accent"
+        >
+          <RadioGroupItem id={`theme-${value}`} value={value} />
+          <Icon className="size-4 text-muted-foreground" aria-hidden />
+          {label}
+        </Label>
+      ))}
+    </RadioGroup>
+  );
+}
+
 export function Account({ user }: { user: User }) {
   return (
     <Page className="max-w-3xl">
@@ -188,6 +221,10 @@ export function Account({ user }: { user: User }) {
         description="Dùng khi bạn quên đăng xuất ở máy khác hoặc nghi ngờ tài khoản bị lộ."
       >
         <SessionsCard />
+      </Section>
+
+      <Section title="Giao diện" description="Lựa chọn được lưu trên trình duyệt này.">
+        <ThemePicker />
       </Section>
     </Page>
   );

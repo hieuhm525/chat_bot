@@ -21,6 +21,7 @@ import { normalizeText } from '../../../../src/shared/normalize-text';
 import { useDialogs } from '@/components/dialogs';
 import { Field, LoadError, Loading, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';
+import { IconAction } from '@/components/icon-action';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -519,20 +520,17 @@ function RulesTab(props: { botId: string; rules: Rule[]; reload: () => Promise<v
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon-sm" onClick={() => setDialogRule(rule)} title="Sửa" aria-label="Sửa">
+                      <IconAction onClick={() => setDialogRule(rule)} label={`Sửa rule ${rule.name}`} tooltip="Sửa">
                         <Pencil />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
+                      </IconAction>
+                      <IconAction
                         className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                         onClick={() => remove(rule)}
                         disabled={busy}
-                        title="Xoá"
-                        aria-label="Xoá"
+                        label={`Xoá rule ${rule.name}`} tooltip="Xoá"
                       >
                         <Trash2 />
-                      </Button>
+                      </IconAction>
                     </div>
                   </TableCell>
                 </TableRow>

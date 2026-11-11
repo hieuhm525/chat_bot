@@ -4,6 +4,7 @@ import { api } from '../../api';
 import { useDialogs } from '@/components/dialogs';
 import { Field, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';
+import { IconAction } from '@/components/icon-action';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -442,7 +443,7 @@ export function Providers() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Switch checked={p.enabled} onCheckedChange={() => toggle(p)} aria-label="Bật provider" />
+                    <Switch checked={p.enabled} onCheckedChange={() => toggle(p)} aria-label={`Bật provider ${p.name}`} />
                   </TableCell>
                   <TableCell>
                     {p.lastCheckAt ? (
@@ -466,21 +467,19 @@ export function Providers() {
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon-sm" onClick={() => edit(p)} title="Sửa" aria-label="Sửa">
+                      <IconAction onClick={() => edit(p)} label={`Sửa provider ${p.name}`} tooltip="Sửa">
                         <Pencil />
-                      </Button>
-                      <Button variant="ghost" size="icon-sm" onClick={() => test(p)} title="Kiểm tra" aria-label="Kiểm tra">
+                      </IconAction>
+                      <IconAction onClick={() => test(p)} label={`Kiểm tra provider ${p.name}`} tooltip="Kiểm tra">
                         <PlugZap />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
+                      </IconAction>
+                      <IconAction
                         className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                         onClick={() => remove(p)}
-                        title="Xoá" aria-label="Xoá"
+                        label={`Xoá provider ${p.name}`} tooltip="Xoá"
                       >
                         <Trash2 />
-                      </Button>
+                      </IconAction>
                     </div>
                   </TableCell>
                 </TableRow>

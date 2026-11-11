@@ -175,6 +175,11 @@ function mergeMessages(current: Message[], latest: Message[]): Message[] {
 
 export function Conversations() {
   const [filters, setFilters] = useState<Filters>(defaultFilters);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const initialFilters = defaultFilters();
+  const activeFilterCount = (['channelId', 'botId', 'mode', 'assignedUserId', 'from', 'to'] as const).filter(
+    (key) => filters[key] !== initialFilters[key],
+  ).length;
   const [options, setOptions] = useState<Options>({ channels: [], bots: [], members: [] });
   const [items, setItems] = useState<ConversationSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -278,6 +283,7 @@ export function Conversations() {
   const applyFilters = (e: FormEvent) => {
     e.preventDefault();
     loadPage(undefined, filters);
+    setFiltersOpen(false);
   };
 
   const open = (id: string) => {
@@ -351,71 +357,87 @@ export function Conversations() {
         <div className="space-y-3 border-b p-4">
           <h1 className="text-lg font-semibold tracking-tight">Hội thoại</h1>
           <form className="space-y-2" onSubmit={applyFilters}>
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="search"
-                aria-label="Tìm hội thoại"
-                className="pl-8"
-                placeholder="Tìm tên khách, ID khách, nội dung tin…"
-                value={filters.search}
-                onChange={setFilter('search')}
-              />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  aria-label="Tìm hội thoại"
+                  className="pl-8"
+                  placeholder="Tìm tên khách, ID khách, nội dung tin…"
+                  value={filters.search}
+                  onChange={setFilter('search')}
+                />
+              </div>
+              {/* Phones: the filter block would push the list below the fold, so it folds behind this toggle. */}
+              <Button
+                type="button"
+                variant="outline"
+                className="md:hidden"
+                aria-expanded={filtersOpen}
+                aria-controls="conversation-filters"
+                onClick={() => setFiltersOpen((o) => !o)}
+              >
+                <Filter />
+                Lọc{activeFilterCount ? ` (${activeFilterCount})` : ''}
+              </Button>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <NativeSelect size="sm" aria-label="Lọc theo kênh" value={filters.channelId} onChange={setFilter('channelId')}>
-                <NativeSelectOption value="">Mọi kênh</NativeSelectOption>
-                {options.channels.map((c) => (
-                  <NativeSelectOption key={c.id} value={c.id}>
-                    {c.name}
-                    {c.status === 'disabled' ? ' (đã tắt)' : ''}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-              <NativeSelect size="sm" aria-label="Lọc theo AI agent" value={filters.botId} onChange={setFilter('botId')}>
-                <NativeSelectOption value="">Mọi AI agent</NativeSelectOption>
-                {options.bots.map((b) => (
-                  <NativeSelectOption key={b.id} value={b.id}>
-                    {b.name}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-              <NativeSelect size="sm" aria-label="Lọc theo chế độ" value={filters.mode} onChange={setFilter('mode')}>
-                <NativeSelectOption value="">Mọi chế độ</NativeSelectOption>
-                <NativeSelectOption value="bot">Bot</NativeSelectOption>
-                <NativeSelectOption value="human">Người trả lời</NativeSelectOption>
-                <NativeSelectOption value="off">Đã tắt</NativeSelectOption>
-              </NativeSelect>
-              {/* Only useful when more than one account can take over a conversation. */}
-              {options.members.length > 1 && (
-                <NativeSelect size="sm" aria-label="Lọc theo người tiếp quản" value={filters.assignedUserId} onChange={setFilter('assignedUserId')}>
-                  <NativeSelectOption value="">Mọi người tiếp quản</NativeSelectOption>
-                  {options.members.map((m) => (
-                    <NativeSelectOption key={m.id} value={m.id}>
-                      {m.username}
+            <div id="conversation-filters" className={cn('space-y-2 md:block', filtersOpen ? 'block' : 'hidden')}>
+              <div className="grid grid-cols-2 gap-2">
+                <NativeSelect size="sm" aria-label="Lọc theo kênh" value={filters.channelId} onChange={setFilter('channelId')}>
+                  <NativeSelectOption value="">Mọi kênh</NativeSelectOption>
+                  {options.channels.map((c) => (
+                    <NativeSelectOption key={c.id} value={c.id}>
+                      {c.name}
+                      {c.status === 'disabled' ? ' (đã tắt)' : ''}
                     </NativeSelectOption>
                   ))}
                 </NativeSelect>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="grid gap-1">
-                <Label htmlFor="f-from" className="text-xs font-normal text-muted-foreground">
-                  Từ ngày
-                </Label>
-                <Input id="f-from" type="date" className="h-8" value={filters.from} onChange={setFilter('from')} />
+                <NativeSelect size="sm" aria-label="Lọc theo AI agent" value={filters.botId} onChange={setFilter('botId')}>
+                  <NativeSelectOption value="">Mọi AI agent</NativeSelectOption>
+                  {options.bots.map((b) => (
+                    <NativeSelectOption key={b.id} value={b.id}>
+                      {b.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <NativeSelect size="sm" aria-label="Lọc theo chế độ" value={filters.mode} onChange={setFilter('mode')}>
+                  <NativeSelectOption value="">Mọi chế độ</NativeSelectOption>
+                  <NativeSelectOption value="bot">Bot</NativeSelectOption>
+                  <NativeSelectOption value="human">Người trả lời</NativeSelectOption>
+                  <NativeSelectOption value="off">Đã tắt</NativeSelectOption>
+                </NativeSelect>
+                {/* Only useful when more than one account can take over a conversation. */}
+                {options.members.length > 1 && (
+                  <NativeSelect size="sm" aria-label="Lọc theo người tiếp quản" value={filters.assignedUserId} onChange={setFilter('assignedUserId')}>
+                    <NativeSelectOption value="">Mọi người tiếp quản</NativeSelectOption>
+                    {options.members.map((m) => (
+                      <NativeSelectOption key={m.id} value={m.id}>
+                        {m.username}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                )}
               </div>
-              <div className="grid gap-1">
-                <Label htmlFor="f-to" className="text-xs font-normal text-muted-foreground">
-                  Đến ngày
-                </Label>
-                <Input id="f-to" type="date" className="h-8" value={filters.to} onChange={setFilter('to')} />
+              <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-1">
+                  <Label htmlFor="f-from" className="text-xs font-normal text-muted-foreground">
+                    Từ ngày
+                  </Label>
+                  <Input id="f-from" type="date" className="h-8" value={filters.from} onChange={setFilter('from')} />
+                </div>
+                <div className="grid gap-1">
+                  <Label htmlFor="f-to" className="text-xs font-normal text-muted-foreground">
+                    Đến ngày
+                  </Label>
+                  <Input id="f-to" type="date" className="h-8" value={filters.to} onChange={setFilter('to')} />
+                </div>
               </div>
+              <Button type="submit" size="sm" className="w-full">
+                <Filter />
+                Áp dụng bộ lọc
+              </Button>
             </div>
-            <Button type="submit" size="sm" className="w-full">
-              <Filter />
-              Lọc
-            </Button>
           </form>
         </div>
 
@@ -434,16 +456,17 @@ export function Conversations() {
                   'flex w-full gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-muted/60',
                   selected?.id === item.id && 'bg-accent hover:bg-accent',
                 )}
+                aria-current={selected?.id === item.id ? 'true' : undefined}
                 onClick={() => open(item.id)}
               >
                 <CustomerAvatar name={name} url={item.customerAvatarUrl} size="lg" />
                 <span className="min-w-0 flex-1 space-y-0.5">
                   <span className="flex items-baseline justify-between gap-2">
                     <span className="truncate text-sm font-medium">{name}</span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(item.lastMessageAt)}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{formatTime(item.lastMessageAt)}</span>
                   </span>
                   <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    <Badge variant="secondary" className={cn('px-1.5 py-0 text-[11px]', MODE_CLASS[item.mode])}>
+                    <Badge variant="secondary" className={cn('px-1.5 py-0 text-xs', MODE_CLASS[item.mode])}>
                       {MODE_LABEL[item.mode] ?? item.mode}
                     </Badge>
                     <span className="truncate">
@@ -499,7 +522,7 @@ export function Conversations() {
                 <div className="min-w-0">
                   <h2 className="truncate font-semibold">{customerName}</h2>
                   <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    <Badge variant="secondary" className={cn('px-1.5 py-0 text-[11px]', MODE_CLASS[selected.mode])}>
+                    <Badge variant="secondary" className={cn('px-1.5 py-0 text-xs', MODE_CLASS[selected.mode])}>
                       {MODE_LABEL[selected.mode] ?? selected.mode}
                     </Badge>
                     {selected.channel?.name}
@@ -524,6 +547,10 @@ export function Conversations() {
             <div
               ref={threadRef}
               onScroll={onThreadScroll}
+              // Remount per conversation so switching threads is not read out as a burst of "new" messages.
+              key={selected.id}
+              role="log"
+              aria-label={`Tin nhắn với ${customerName}`}
               className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-5 py-4"
             >
               {hasOlder ? (
@@ -578,15 +605,15 @@ export function Conversations() {
                       <span className="flex min-w-0 items-center gap-1.5 font-medium">
                         <span className="truncate">{fromCustomer ? customerName : m.senderName}</span>
                         {tag && (
-                          <Badge variant="secondary" className={cn('px-1.5 py-0 text-[10px]', tag.className)}>
+                          <Badge variant="secondary" className={cn('px-1.5 py-0 text-xs', tag.className)}>
                             {tag.label}
                           </Badge>
                         )}
                       </span>
-                      <time className="text-[11px] text-muted-foreground">{formatTime(m.createdAt)}</time>
+                      <time className="text-xs text-muted-foreground">{formatTime(m.createdAt)}</time>
                     </div>
                     <div className="whitespace-pre-wrap">{m.content}</div>
-                    <div className={cn('mt-1 text-[11px] text-muted-foreground', failed && 'text-destructive')}>
+                    <div className={cn('mt-1 text-xs text-muted-foreground', failed && 'text-destructive')}>
                       {STATUS_LABEL[m.status] ?? m.status}
                       {m.errorCode ? ` · Lý do: ${m.errorCode}` : ''}
                       {clickable ? ' · Bấm để xem chi tiết' : ''}
