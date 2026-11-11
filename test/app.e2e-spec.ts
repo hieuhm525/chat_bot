@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { AppModule } from '../src/app.module';
 import { DRIZZLE, PG_POOL } from '../src/db/db.module';
 import { Db } from '../src/db/db.module';
@@ -207,6 +207,12 @@ describe('bv-agent-msg e2e', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
+      if (url.includes('/subscribed_apps')) {
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       return new Response(JSON.stringify({ message_id: `provider-out-${++outboundSeq}` }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -264,6 +270,54 @@ describe('bv-agent-msg e2e', () => {
       .send(body)
       .expect(201);
     expect(res.body.ok).toBe(false);
+  });
+
+  it('verifies Meta with the channel verify token and signs with the channel app secret', async () => {
+    const list = await agent.get('/api/v1/channels').expect(200);
+    const page = list.body.items.find((c: any) => c.externalId === 'PAGE1');
+    const verifyToken = 'tenant-verify-token-0123456789';
+    await agent
+      .patch(`/api/v1/channels/${page.id}`)
+      .send({ config: { verifyToken }, credentials: { accessToken: 'fake', appSecret: 'tenantsecret' } })
+      .expect(200);
+    try {
+      const ok = await request(app.getHttpServer())
+        .get(`/webhooks/messenger?hub.mode=subscribe&hub.verify_token=${verifyToken}&hub.challenge=c1`)
+        .expect(200);
+      expect(ok.text).toBe('c1');
+      await request(app.getHttpServer())
+        .get('/webhooks/messenger?hub.mode=subscribe&hub.verify_token=wrong-token&hub.challenge=c2')
+        .expect(403);
+
+      const raw = JSON.stringify(payload('xin chào', 'tenant-secret-mid'));
+      const tenantSig = 'sha256=' + createHmac('sha256', 'tenantsecret').update(raw).digest('hex');
+      const signed = await request(app.getHttpServer())
+        .post('/webhooks/messenger')
+        .set('content-type', 'application/json')
+        .set('x-hub-signature-256', tenantSig)
+        .send(raw)
+        .expect(201);
+      expect(signed.body.ok).toBe(true);
+      // The platform-wide secret no longer verifies a channel that has its own.
+      const platformSigned = await request(app.getHttpServer())
+        .post('/webhooks/messenger')
+        .set('content-type', 'application/json')
+        .set('x-hub-signature-256', sign(raw))
+        .send(raw)
+        .expect(201);
+      expect(platformSigned.body.ok).toBe(false);
+    } finally {
+      await agent
+        .patch(`/api/v1/channels/${page.id}`)
+        .send({ config: {}, credentials: { accessToken: 'fake' } })
+        .expect(200);
+      // Drop the event stored above so later tests start from an empty conversation list.
+      const events = await db.select({ id: webhookEvents.id }).from(webhookEvents).where(eq(webhookEvents.channelId, page.id));
+      for (const { id } of events) {
+        await db.delete(outbox).where(sql`${outbox.payload}->>'webhookEventId' = ${id}`);
+      }
+      await db.delete(webhookEvents).where(eq(webhookEvents.channelId, page.id));
+    }
   });
 
   it('stores a webhook, answers by rule, and dedupes retries', async () => {

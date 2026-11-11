@@ -37,7 +37,7 @@ export class WebhookController {
 
   @Public()
   @Get(':provider')
-  verify(
+  async verify(
     @Param('provider') provider: Provider,
     @Query('hub.mode') mode: string,
     @Query('hub.verify_token') token: string,
@@ -45,8 +45,11 @@ export class WebhookController {
     @Res() res: Response,
   ) {
     if (!PROVIDERS.includes(provider)) throw new BadRequestException('Kênh không hỗ trợ');
-    if (mode === 'subscribe' && token === this.config.getOrThrow<string>('META_VERIFY_TOKEN')) {
-      return res.status(200).type('text/plain').send(challenge);
+    if (mode === 'subscribe' && token) {
+      const envToken = this.config.getOrThrow<string>('META_VERIFY_TOKEN');
+      if ((envToken && token === envToken) || (await this.channels.hasVerifyToken(provider, token))) {
+        return res.status(200).type('text/plain').send(challenge);
+      }
     }
     return res.status(403).send('forbidden');
   }

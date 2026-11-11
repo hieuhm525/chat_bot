@@ -27,8 +27,10 @@ export class MessengerAdapter implements ChannelAdapter {
   verify(req: {
     rawBody: Buffer;
     headers: Record<string, string | string[] | undefined>;
+    channel?: AdapterChannel;
   }): boolean {
-    const secret = this.config.getOrThrow<string>('META_APP_SECRET');
+    // Each tenant connects its own Meta App; META_APP_SECRET is the fallback for older channels.
+    const secret = req.channel?.credentials.appSecret || this.config.getOrThrow<string>('META_APP_SECRET');
     const header = req.headers['x-hub-signature-256'];
     if (!secret || !header || Array.isArray(header)) return false;
     const expected = 'sha256=' + createHmac('sha256', secret).update(req.rawBody).digest('hex');
@@ -107,7 +109,7 @@ export class MessengerAdapter implements ChannelAdapter {
 
   async send(channel: AdapterChannel, to: string, msg: OutgoingText): Promise<{ providerMessageId: string }> {
     const version = (channel.config.graphVersion as string) ?? 'v26.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/me/messages`, {
+    const res = await graphFetch(`https://graph.facebook.com/${version}/me/messages`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${channel.credentials.accessToken}`,
@@ -132,12 +134,46 @@ export class MessengerAdapter implements ChannelAdapter {
     return { ok: true as const };
   }
 
+  /**
+   * Subscribes the Page to the app's webhook (idempotent) so the tenant does not have
+   * to do it in Meta's UI. Reading Page fields would need pages_read_engagement, which
+   * a Messenger bot does not otherwise need, so this call is also the token check.
+   */
   async healthCheck(channel: AdapterChannel) {
     const version = (channel.config.graphVersion as string) ?? 'v26.0';
-    const res = await fetch(
-      `https://graph.facebook.com/${version}/${channel.externalId}?fields=name&access_token=${encodeURIComponent(channel.credentials.accessToken)}`,
+    const token = channel.credentials.accessToken;
+    if (!token) return { ok: false, detail: 'Thiếu Page Access Token' };
+    const headers = { Authorization: `Bearer ${token}` };
+
+
+    // Subscribing only succeeds with this Page's own token, so it also proves token and Page ID match.
+    const fields = 'messages,messaging_postbacks,message_echoes,message_deliveries,message_reads';
+    const subRes = await graphFetch(
+      `https://graph.facebook.com/${version}/${channel.externalId}/subscribed_apps?subscribed_fields=${fields}`,
+      { method: 'POST', headers },
     );
-    if (!res.ok) return { ok: false, detail: `Graph ${res.status}` };
-    return { ok: true, detail: 'kết nối OK' };
+    const sub = (await subRes.json().catch(() => ({}))) as any;
+    if (!subRes.ok || sub.success !== true) {
+      return {
+        ok: false,
+        detail: `Không đăng ký được Page ${channel.externalId} nhận tin (token sai Page, hết hạn, hoặc thiếu quyền pages_messaging / pages_manage_metadata): ${graphError(sub, subRes.status)}`,
+      };
+    }
+    return { ok: true, detail: `Đã kết nối Page ${channel.externalId}, Page đã đăng ký nhận tin nhắn` };
   }
+}
+
+/** Network failures surface as a bare `fetch failed`; keep the real reason (DNS, timeout, refused). */
+async function graphFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
+  } catch (err) {
+    const cause = (err as { cause?: { code?: string; message?: string } }).cause;
+    const reason = (err as Error).name === 'TimeoutError' ? 'timeout' : (cause?.code ?? cause?.message ?? String(err));
+    throw new SendError(`Không kết nối được graph.facebook.com (${reason})`, true, 'network');
+  }
+}
+
+function graphError(body: any, status: number): string {
+  return body?.error?.message ?? `Graph ${status}`;
 }

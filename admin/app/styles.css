@@ -152,3 +152,21 @@ th { background: #f0f3f7; font-size: 12px; text-transform: uppercase; letter-spa
 .modal dl { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; margin: 0; font-size: 14px; }
 .modal dt { color: var(--muted); }
 .modal dd { margin: 0; word-break: break-word; }
+
+/* Channel connect form */
+.notice { background: #eef6ee; border: 1px solid #cfe6cf; color: #1e5b26; padding: 10px 12px; border-radius: 8px; }
+.channel-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.panel h3 { margin: 0; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.panel h3 a { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.panel .field textarea, .panel .field select { font-weight: 400; width: 100%; }
+.panel .field textarea { resize: vertical; font-family: ui-monospace, monospace; font-size: 12px; }
+.platforms { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.platform { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 14px 8px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); font-weight: 500; }
+.platform.selected { border-color: #8b5cf6; background: #f6f2ff; }
+.platform:disabled { opacity: 0.5; cursor: not-allowed; }
+.platform small { font-weight: 400; color: var(--muted); font-size: 11px; }
+.copy-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.copy-value { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font-size: 12px; font-weight: 400; }
+.steps ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; line-height: 1.5; }
+.steps .error { font-size: 13px; margin: 0; }

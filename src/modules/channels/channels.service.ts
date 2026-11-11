@@ -8,6 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomBytes } from 'node:crypto';
 import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, Db } from '../../db/db.module';
 import { channels, bots, conversations, customers, webhookEvents, workspaces } from '../../db/schema';
@@ -59,6 +60,13 @@ export class ChannelsService {
 
   async create(workspaceId: string, input: ChannelInput) {
     if (!input.botId) throw new BadRequestException('Kênh phải chọn AI agent');
+    if (input.provider === 'messenger') {
+      const token = input.config?.verifyToken;
+      // The verify token is what routes Meta's subscribe handshake, so it must be long and unguessable.
+      if (typeof token !== 'string' || token.length < 16) {
+        input = { ...input, config: { ...input.config, verifyToken: randomBytes(16).toString('hex') } };
+      }
+    }
     try {
       return await this.db.transaction(async (tx) => {
         // Lock the workspace row so concurrent creates cannot both pass the plan limit.
@@ -197,6 +205,17 @@ export class ChannelsService {
       )
       .limit(1);
     return row ? this.toAdapterChannel(row) : null;
+  }
+
+  /** Meta's subscribe handshake only carries the verify token, so that is how the channel is found. */
+  async hasVerifyToken(provider: Provider, token: string): Promise<boolean> {
+    if (!token) return false;
+    const [row] = await this.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(and(eq(channels.provider, provider), sql`${channels.config}->>'verifyToken' = ${token}`))
+      .limit(1);
+    return !!row;
   }
 
   /**
