@@ -1,8 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { api } from '../api';
 import type { User } from '../App';
 import type { SignupStatus } from './register';
+import { AuthShell } from '@/components/auth-shell';
+import { Field, Notices } from '@/components/page';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export function Login({ onLogin }: { onLogin: (user: User) => void }) {
   const [username, setUsername] = useState('');
@@ -35,54 +40,43 @@ export function Login({ onLogin }: { onLogin: (user: User) => void }) {
   };
 
   return (
-    <div className="auth-page">
-      <main className="auth-box">
-        <div className="auth-brand">
-          <span className="auth-mark">bv</span>
-          bv-agent-msg
-        </div>
+    <AuthShell title="Đăng nhập" description="Dùng tài khoản được cấp cho bạn.">
+      <form onSubmit={submit} className="grid gap-4">
+        <Field label="Tên đăng nhập" htmlFor="username">
+          <Input
+            id="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
+            autoFocus
+            required
+          />
+        </Field>
 
-        <div className="auth-card">
-          <h1>Đăng nhập</h1>
-          <p className="auth-intro">Dùng tài khoản được cấp cho bạn.</p>
+        <Field label="Mật khẩu" htmlFor="password">
+          <Input
+            id="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            autoComplete="current-password"
+            required
+            minLength={6}
+          />
+        </Field>
 
-          <form onSubmit={submit} className="auth-form">
-          <label className="field">
-            <span>Tên đăng nhập</span>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-              autoFocus
-              required
-            />
-          </label>
+        <Notices error={error} />
 
-          <label className="field">
-            <span>Mật khẩu</span>
-            <input
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              type="password"
-              autoComplete="current-password"
-              required
-              minLength={6}
-            />
-          </label>
-
-          {error && <div className="alert">{error}</div>}
-
-          <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
-          </button>
-          {signup && (
-            <p className="auth-intro">
-              Chưa có tài khoản? <Link to="/register">Đăng ký dùng thử</Link>
-            </p>
-          )}
-          </form>
-        </div>
-      </main>
-    </div>
+        <Button type="submit" className="w-full" disabled={busy}>
+          {busy && <Loader2 className="animate-spin" />}
+          {busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
+        </Button>
+        {signup && (
+          <p className="text-center text-sm text-muted-foreground">
+            Chưa có tài khoản? <Link to="/register">Đăng ký dùng thử</Link>
+          </p>
+        )}
+      </form>
+    </AuthShell>
   );
 }

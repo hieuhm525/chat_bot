@@ -56,10 +56,6 @@ export class Env {
   @IsString()
   ZALO_APP_ID = '';
 
-  @IsOptional()
-  @IsString()
-  ZALO_APP_SECRET = '';
-
   /** One-time bootstrap token for the first admin. Empty = local-only setup. */
   @IsOptional()
   @IsString()

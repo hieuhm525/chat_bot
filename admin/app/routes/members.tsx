@@ -1,5 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { KeyRound, UserPlus, UserX } from 'lucide-react';
 import { api } from '../api';
+import { useDialogs } from '@/components/dialogs';
+import { Field, Notices, Page, PageHeader, Section, TableCard } from '@/components/page';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 interface Member {
   id: string;
@@ -14,6 +22,7 @@ export function Members() {
   const [form, setForm] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const { confirm, askPassword } = useDialogs();
 
   const load = () => api<Member[]>('/members').then(setItems).catch((e) => setError(e.message));
   useEffect(() => {
@@ -35,7 +44,10 @@ export function Members() {
   };
 
   const changePassword = async (member: Member) => {
-    const password = window.prompt(`Mật khẩu mới cho ${member.username} (từ 6 ký tự):`);
+    const password = await askPassword({
+      title: `Đổi mật khẩu ${member.username}`,
+      description: 'Các phiên đăng nhập cũ của tài khoản này sẽ bị đăng xuất.',
+    });
     if (!password) return;
     setError('');
     setNotice('');
@@ -48,7 +60,13 @@ export function Members() {
   };
 
   const disable = async (member: Member) => {
-    if (!confirm(`Vô hiệu hoá ${member.username}? Họ sẽ không đăng nhập được nữa.`)) return;
+    const ok = await confirm({
+      title: `Vô hiệu hoá ${member.username}?`,
+      description: 'Tài khoản này sẽ không đăng nhập được nữa.',
+      confirmLabel: 'Vô hiệu hoá',
+      destructive: true,
+    });
+    if (!ok) return;
     setError('');
     setNotice('');
     try {
@@ -61,83 +79,107 @@ export function Members() {
   };
 
   return (
-    <div className="pad">
-      <h1>Thành viên</h1>
-      <p className="muted">
-        Nhân viên (agent) xem hội thoại, tiếp quản và trả lời khách; không sửa được bot, kênh hay thành viên.
-      </p>
-      {error && <p className="error">{error}</p>}
-      {notice && <p className="muted">{notice}</p>}
+    <Page>
+      <PageHeader
+        title="Thành viên"
+        description="Nhân viên (agent) xem hội thoại, tiếp quản và trả lời khách; không sửa được bot, kênh hay thành viên."
+      />
+      <Notices error={error} notice={notice} />
 
-      <table>
-        <thead>
-          <tr>
-            <th>Tên đăng nhập</th>
-            <th>Vai trò</th>
-            <th>Trạng thái</th>
-            <th>Ngày tạo</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((m) => (
-            <tr key={m.id}>
-              <td>{m.username}</td>
-              <td>{m.role === 'owner' ? 'Chủ shop' : 'Nhân viên'}</td>
-              <td>
-                <span className={`badge ${m.disabledAt ? 'error' : ''}`}>
-                  {m.disabledAt ? 'Đã vô hiệu hoá' : 'Hoạt động'}
-                </span>
-              </td>
-              <td>{new Date(m.createdAt).toLocaleDateString('vi-VN')}</td>
-              <td className="actions">
-                <button onClick={() => changePassword(m)}>Đổi mật khẩu</button>
-                {!m.disabledAt && (
-                  <button className="danger" onClick={() => disable(m)}>
-                    Vô hiệu hoá
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-          {!items.length && (
-            <tr>
-              <td colSpan={5} className="muted">
-                Chưa có thành viên.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <TableCard>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Tên đăng nhập</TableHead>
+              <TableHead>Vai trò</TableHead>
+              <TableHead>Trạng thái</TableHead>
+              <TableHead>Ngày tạo</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((m) => (
+              <TableRow key={m.id}>
+                <TableCell className="font-medium">{m.username}</TableCell>
+                <TableCell>{m.role === 'owner' ? 'Chủ shop' : 'Nhân viên'}</TableCell>
+                <TableCell>
+                  {m.disabledAt ? (
+                    <Badge variant="destructive">Đã vô hiệu hoá</Badge>
+                  ) : (
+                    <Badge variant="secondary" className="bg-success/10 text-success">
+                      Hoạt động
+                    </Badge>
+                  )}
+                </TableCell>
+                <TableCell className="text-muted-foreground">{new Date(m.createdAt).toLocaleDateString('vi-VN')}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => changePassword(m)}>
+                      <KeyRound />
+                      Đổi mật khẩu
+                    </Button>
+                    {!m.disabledAt && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => disable(m)}
+                      >
+                        <UserX />
+                        Vô hiệu hoá
+                      </Button>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {!items.length && (
+              <TableRow>
+                <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                  Chưa có thành viên.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableCard>
 
-      <h2>Thêm nhân viên</h2>
-      <form className="grid" onSubmit={submit}>
-        <label>
-          Tên đăng nhập
-          <input
-            value={form.username}
-            onChange={(e) => setForm({ ...form, username: e.target.value })}
-            required
-            minLength={3}
-            maxLength={32}
-            pattern="[a-zA-Z0-9._\-]+"
-            title="3-32 ký tự: chữ, số, dấu chấm, gạch dưới, gạch ngang"
-            autoComplete="off"
-          />
-        </label>
-        <label>
-          Mật khẩu
-          <input
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            type="password"
-            required
-            minLength={6}
-            autoComplete="new-password"
-          />
-        </label>
-        <button type="submit">Thêm nhân viên</button>
-      </form>
-    </div>
+      <Section title="Thêm nhân viên">
+        <Card className="py-5">
+          <CardContent>
+            <form className="grid items-end gap-4 sm:grid-cols-[1fr_1fr_auto]" onSubmit={submit}>
+              <Field label="Tên đăng nhập" htmlFor="m-username">
+                <Input
+                  id="m-username"
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  required
+                  minLength={3}
+                  maxLength={32}
+                  pattern="[a-zA-Z0-9._\-]+"
+                  title="3-32 ký tự: chữ, số, dấu chấm, gạch dưới, gạch ngang"
+                  autoComplete="off"
+                />
+              </Field>
+              <Field label="Mật khẩu" htmlFor="m-password">
+                <Input
+                  id="m-password"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  type="password"
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                />
+              </Field>
+              <Button type="submit">
+                <UserPlus />
+                Thêm nhân viên
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </Section>
+    </Page>
   );
 }

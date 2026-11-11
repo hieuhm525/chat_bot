@@ -1,6 +1,15 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Plus, Settings2, Trash2 } from 'lucide-react';
 import { api } from '../api';
+import { useDialogs } from '@/components/dialogs';
+import { Field, LoadError, Loading, Notices, Page, PageHeader, Section, TableCard } from '@/components/page';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export interface Agent {
   id: string;
@@ -27,6 +36,7 @@ export function Bots() {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const { confirm } = useDialogs();
 
   const load = () => api<BotList>('/bots').then(setData).catch((e) => setError(e.message));
   useEffect(() => {
@@ -58,7 +68,13 @@ export function Bots() {
   };
 
   const remove = async (bot: Agent) => {
-    if (!confirm(`Xoá AI agent ${bot.name}?`)) return;
+    const ok = await confirm({
+      title: `Xoá AI agent ${bot.name}?`,
+      description: 'Toàn bộ rule của AI agent này cũng bị xoá.',
+      confirmLabel: 'Xoá',
+      destructive: true,
+    });
+    if (!ok) return;
     setError('');
     setNotice('');
     try {
@@ -70,70 +86,96 @@ export function Bots() {
     }
   };
 
-  if (error && !data) return <p className="error pad">{error}</p>;
-  if (!data) return <p className="muted pad">Đang tải…</p>;
+  if (error && !data) return <LoadError message={error} />;
+  if (!data) return <Loading />;
+
+  const full = data.items.length >= data.maxBots;
 
   return (
-    <div className="pad">
-      <h1>AI agent</h1>
-      <p className="muted">
-        Đang dùng {data.items.length} / {data.maxBots} theo gói thuê.
-      </p>
-      {error && <p className="error">{error}</p>}
-      {notice && <p className="muted">{notice}</p>}
+    <Page>
+      <PageHeader
+        title="AI agent"
+        description="Mỗi AI agent có bộ rule, lời chào và persona riêng; gắn vào một hoặc nhiều kênh."
+        actions={
+          <Badge variant="outline" className="h-7 px-3 text-sm">
+            {data.items.length} / {data.maxBots} theo gói thuê
+          </Badge>
+        }
+      />
+      <Notices error={error} notice={notice} />
 
-      <table>
-        <thead>
-          <tr>
-            <th>Tên</th>
-            <th>Bật</th>
-            <th>Rule</th>
-            <th>Kênh đang gắn</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {data.items.map((bot) => (
-            <tr key={bot.id}>
-              <td>
-                <Link to={`/bots/${bot.id}`}>{bot.name}</Link>
-              </td>
-              <td>
-                <input type="checkbox" checked={bot.enabled} onChange={() => toggle(bot)} />
-              </td>
-              <td>{bot.ruleCount}</td>
-              <td>{bot.channelCount}</td>
-              <td className="actions">
-                <Link to={`/bots/${bot.id}`}>Cấu hình</Link>
-                <button className="danger" onClick={() => remove(bot)}>
-                  Xoá
-                </button>
-              </td>
-            </tr>
-          ))}
-          {!data.items.length && (
-            <tr>
-              <td colSpan={5} className="muted">
-                Chưa có AI agent.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <TableCard>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Tên</TableHead>
+              <TableHead>Bật</TableHead>
+              <TableHead>Rule</TableHead>
+              <TableHead>Kênh đang gắn</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((bot) => (
+              <TableRow key={bot.id}>
+                <TableCell className="font-medium">
+                  <Link to={`/bots/${bot.id}`} className="text-foreground">
+                    {bot.name}
+                  </Link>
+                </TableCell>
+                <TableCell>
+                  <Switch checked={bot.enabled} onCheckedChange={() => toggle(bot)} aria-label="Bật AI agent" />
+                </TableCell>
+                <TableCell className="tabular-nums">{bot.ruleCount}</TableCell>
+                <TableCell className="tabular-nums">{bot.channelCount}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" asChild>
+                      <Link to={`/bots/${bot.id}`} className="hover:no-underline">
+                        <Settings2 />
+                        Cấu hình
+                      </Link>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => remove(bot)}
+                      title="Xoá" aria-label="Xoá"
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {!data.items.length && (
+              <TableRow>
+                <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                  Chưa có AI agent.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableCard>
 
-      <h2>Thêm AI agent</h2>
-      <form className="grid" onSubmit={create}>
-        <label>
-          Tên
-          <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={100} />
-        </label>
-        <button type="submit" disabled={data.items.length >= data.maxBots}>
-          Thêm AI agent
-        </button>
-      </form>
-      {data.items.length >= data.maxBots && (
-        <p className="muted">Gói thuê đã đạt giới hạn số AI agent.</p>
-      )}
-    </div>
+      <Section title="Thêm AI agent">
+        <Card className="py-5">
+          <CardContent className="space-y-3">
+            <form className="grid items-end gap-4 sm:grid-cols-[1fr_auto]" onSubmit={create}>
+              <Field label="Tên" htmlFor="bot-name">
+                <Input id="bot-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={100} />
+              </Field>
+              <Button type="submit" disabled={full}>
+                <Plus />
+                Thêm AI agent
+              </Button>
+            </form>
+            {full && <p className="text-sm text-muted-foreground">Gói thuê đã đạt giới hạn số AI agent.</p>}
+          </CardContent>
+        </Card>
+      </Section>
+    </Page>
   );
 }

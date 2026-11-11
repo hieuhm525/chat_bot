@@ -1,5 +1,17 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { ExternalLink, FlaskConical, Loader2, Pencil, PlugZap, ScanSearch, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { api } from '../api';
+import { scrollToId, useDialogs } from '@/components/dialogs';
+import { Field, Notices, Page, PageHeader, TableCard } from '@/components/page';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Switch } from '@/components/ui/switch';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface Provider {
   id: string;
@@ -106,6 +118,7 @@ export function Providers() {
   const [check, setCheck] = useState<TestResponse | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const { confirm } = useDialogs();
 
   const load = () =>
     Promise.all([api<Provider[]>('/llm-providers'), api<Usage[]>('/llm-providers/usage')])
@@ -253,14 +266,20 @@ export function Providers() {
     setPreset(presetFor(provider.baseUrl));
     clearModels();
     setCheck(null);
+    scrollToId('provider-form');
   };
 
   const toggle = async (provider: Provider) => {
-    await api(`/llm-providers/${provider.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ enabled: !provider.enabled }),
-    });
-    await load();
+    setError('');
+    try {
+      await api(`/llm-providers/${provider.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: !provider.enabled }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Lỗi cập nhật provider');
+    }
   };
 
   const test = async (provider: Provider) => {
@@ -280,9 +299,15 @@ export function Providers() {
   };
 
   const remove = async (provider: Provider) => {
-    if (!confirm(`Xoá provider ${provider.name}?`)) return;
-    await api(`/llm-providers/${provider.id}`, { method: 'DELETE' });
-    await load();
+    const ok = await confirm({ title: `Xoá provider ${provider.name}?`, confirmLabel: 'Xoá', destructive: true });
+    if (!ok) return;
+    setError('');
+    try {
+      await api(`/llm-providers/${provider.id}`, { method: 'DELETE' });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Lỗi xoá provider');
+    }
   };
 
   const current = PRESETS.find((p) => p.id === preset);
@@ -303,252 +328,345 @@ export function Providers() {
   const usageOf = (name: string) => usage.find((u) => u.provider === name);
 
   return (
-    <div className="pad">
-      <h1>AI provider</h1>
-      <p className="muted">
-        Thứ tự thử từ trên xuống (ưu tiên cao trước). Provider lỗi sẽ chuyển sang provider kế tiếp. Key được mã hoá,
-        không bao giờ hiển thị lại.
-      </p>
-      {error && <p className="error">{error}</p>}
-      {notice && <p className="muted">{notice}</p>}
+    <Page className="max-w-7xl">
+      <PageHeader
+        title="AI provider"
+        description="Thứ tự thử từ trên xuống (ưu tiên cao trước). Provider lỗi sẽ chuyển sang provider kế tiếp. Key được mã hoá, không bao giờ hiển thị lại."
+      />
+      <Notices error={error} notice={notice} />
 
-      <table>
-        <thead>
-          <tr>
-            <th>Ưu tiên</th>
-            <th>Tên</th>
-            <th>Model</th>
-            <th>Key</th>
-            <th title="Tổng token bot đã dùng với provider này (vào + ra)">Đã dùng</th>
-            <th>Bật</th>
-            <th>Kiểm tra</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((p) => {
-            const u = usageOf(p.name);
-            return (
-              <tr key={p.id}>
-                <td>{p.priority}</td>
-                <td>
-                  <div>{p.name}</div>
-                  <div className="muted">{p.baseUrl}</div>
-                </td>
-                <td>{p.model}</td>
-                <td>{p.hasKey ? `••••${p.keyHint ?? ''}` : '—'}</td>
-                <td>
-                  {u ? (
-                    <>
-                      <div>{fmt(u.tokensIn + u.tokensOut)} token</div>
-                      <div className="muted">
-                        hôm nay {fmt(u.tokensToday)} · {fmt(u.answers)} câu trả lời
-                      </div>
-                    </>
-                  ) : (
-                    <span className="muted">0</span>
-                  )}
-                </td>
-                <td>
-                  <input type="checkbox" checked={p.enabled} onChange={() => toggle(p)} />
-                </td>
-                <td>
-                  {p.lastCheckAt ? (
-                    <span className={`badge ${p.lastCheckOk ? '' : 'disabled'}`} title={p.lastError ?? ''}>
-                      {p.lastCheckOk ? 'OK' : 'Lỗi'}
-                    </span>
-                  ) : (
-                    <span className="muted">chưa</span>
-                  )}
-                </td>
-                <td className="actions">
-                  <button onClick={() => edit(p)}>Sửa</button>
-                  <button onClick={() => test(p)}>Kiểm tra</button>
-                  <button className="danger" onClick={() => remove(p)}>
-                    Xoá
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-          {!items.length && (
-            <tr>
-              <td colSpan={8} className="muted">
-                Chưa có provider. Thêm key Gemini / OpenRouter / Groq để bật trả lời bằng AI.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-
-      <h2>{form.id ? 'Sửa provider' : 'Thêm provider'}</h2>
-      <form className="grid" onSubmit={submit}>
-        <label>
-          Nhà cung cấp
-          <select value={preset} onChange={(e) => choosePreset(e.target.value)}>
-            {PRESETS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-            <option value="custom">Tuỳ chỉnh (OpenAI-compatible)</option>
-          </select>
-        </label>
-        <label>
-          Tên
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required maxLength={100} />
-        </label>
-        <label>
-          Base URL
-          <input
-            value={form.baseUrl}
-            onChange={(e) => {
-              setForm({ ...form, baseUrl: e.target.value });
-              setPreset(presetFor(e.target.value));
-            }}
-            required
-            readOnly={preset !== 'custom'}
-            placeholder="https://openrouter.ai/api/v1"
-          />
-        </label>
-        <label>
-          API key{' '}
-          {current?.keyUrl && (
-            <a href={current.keyUrl} target="_blank" rel="noreferrer" className="muted">
-              (lấy key)
-            </a>
-          )}
-          <input
-            value={form.apiKey}
-            onChange={(e) => {
-              setForm({ ...form, apiKey: e.target.value });
-              clearModels();
-              setCheck(null);
-            }}
-            type="password"
-            autoComplete="new-password"
-            placeholder={form.id ? 'Để trống = giữ key cũ' : preset === 'ollama' ? 'Không cần key' : 'Dán API key'}
-          />
-        </label>
-        <label>
-          Model
-          {visible.length ? (
-            <select value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} required>
-              {visible.map((m) => {
-                const p = probes[m];
-                return (
-                  <option key={m} value={m} title={p && p !== 'pending' && !p.ok ? p.detail : undefined}>
-                    {mark(m)}
-                  </option>
-                );
-              })}
-            </select>
-          ) : (
-            <input
-              value={form.model}
-              onChange={(e) => setForm({ ...form, model: e.target.value })}
-              required
-              placeholder="Bấm “Quét model” hoặc gõ tên"
-            />
-          )}
-        </label>
-        <button type="button" onClick={scan} disabled={!form.baseUrl || busy !== ''}>
-          {busy === 'scan' ? 'Đang quét…' : 'Quét model'}
-        </button>
-        {models.length > 0 && (
-          <button type="button" onClick={probeAll} disabled={busy !== ''}>
-            {busy === 'probe' ? `Đang thử ${done.length}/${models.length}…` : 'Lọc model dùng được'}
-          </button>
-        )}
-        {models.length > 0 && (
-          <p className="muted" style={{ gridColumn: '1 / -1', margin: 0 }}>
-            {models.length} model chat{hidden ? ` (đã ẩn ${hidden} model embedding/ảnh/âm thanh)` : ''}.
-            {probed && busy !== 'probe' && (
-              <>
-                {' '}
-                Dùng được {okCount}/{models.length}.{' '}
-                <button type="button" className="link" onClick={() => setShowFailed(!showFailed)}>
-                  {showFailed ? 'Chỉ hiện model dùng được' : 'Hiện cả model lỗi'}
-                </button>
-              </>
+      <TableCard>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-20">Ưu tiên</TableHead>
+              <TableHead>Tên</TableHead>
+              <TableHead>Model</TableHead>
+              <TableHead>Key</TableHead>
+              <TableHead title="Tổng token bot đã dùng với provider này (vào + ra)">Đã dùng</TableHead>
+              <TableHead>Bật</TableHead>
+              <TableHead>Kiểm tra</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((p) => {
+              const u = usageOf(p.name);
+              return (
+                <TableRow key={p.id} data-state={form.id === p.id ? 'selected' : undefined}>
+                  <TableCell className="tabular-nums">{p.priority}</TableCell>
+                  <TableCell>
+                    <div className="font-medium">{p.name}</div>
+                    <div className="max-w-56 truncate text-xs text-muted-foreground">{p.baseUrl}</div>
+                  </TableCell>
+                  <TableCell className="max-w-48 truncate font-mono text-xs">{p.model}</TableCell>
+                  <TableCell className="font-mono text-xs">{p.hasKey ? `••••${p.keyHint ?? ''}` : '—'}</TableCell>
+                  <TableCell>
+                    {u ? (
+                      <>
+                        <div className="tabular-nums">{fmt(u.tokensIn + u.tokensOut)} token</div>
+                        <div className="text-xs text-muted-foreground">
+                          hôm nay {fmt(u.tokensToday)} · {fmt(u.answers)} câu trả lời
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">0</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Switch checked={p.enabled} onCheckedChange={() => toggle(p)} aria-label="Bật provider" />
+                  </TableCell>
+                  <TableCell>
+                    {p.lastCheckAt ? (
+                      p.lastCheckOk ? (
+                        <Badge variant="secondary" className="bg-success/10 text-success">
+                          OK
+                        </Badge>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge variant="secondary" className="cursor-help bg-destructive/10 text-destructive">
+                              Lỗi
+                            </Badge>
+                          </TooltipTrigger>
+                          {p.lastError && <TooltipContent className="max-w-xs">{p.lastError}</TooltipContent>}
+                        </Tooltip>
+                      )
+                    ) : (
+                      <span className="text-muted-foreground">chưa</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon-sm" onClick={() => edit(p)} title="Sửa" aria-label="Sửa">
+                        <Pencil />
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => test(p)} title="Kiểm tra" aria-label="Kiểm tra">
+                        <PlugZap />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => remove(p)}
+                        title="Xoá" aria-label="Xoá"
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {!items.length && (
+              <TableRow>
+                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                  Chưa có provider. Thêm key Gemini / OpenRouter / Groq để bật trả lời bằng AI.
+                </TableCell>
+              </TableRow>
             )}
-            {!probed && ' Bấm “Lọc model dùng được” để gọi thử từng model (mỗi model tốn ~10 token).'}
-          </p>
-        )}
-        <label>
-          Ưu tiên
-          <input
-            type="number"
-            value={form.priority}
-            onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
-          />
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
-          Bật provider
-        </label>
-        <button type="button" onClick={testDraft} disabled={!form.baseUrl || !form.model || busy !== ''}>
-          {busy === 'test' ? 'Đang kiểm tra…' : 'Test kết nối'}
-        </button>
-        <button type="submit">{form.id ? 'Lưu provider' : 'Thêm provider'}</button>
-        {form.id && (
-          <button type="button" className="link" onClick={resetForm}>
-            Huỷ
-          </button>
-        )}
-      </form>
+          </TableBody>
+        </Table>
+      </TableCard>
 
-      {check && <CheckResult check={check} quotaUrl={current?.quotaUrl} />}
-    </div>
+      <form id="provider-form" onSubmit={submit} className="scroll-mt-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>{form.id ? `Sửa provider: ${form.name}` : 'Thêm provider'}</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 md:grid-cols-2">
+            <Field label="Nhà cung cấp" htmlFor="p-preset">
+              <NativeSelect id="p-preset" value={preset} onChange={(e) => choosePreset(e.target.value)}>
+                {PRESETS.map((p) => (
+                  <NativeSelectOption key={p.id} value={p.id}>
+                    {p.label}
+                  </NativeSelectOption>
+                ))}
+                <NativeSelectOption value="custom">Tuỳ chỉnh (OpenAI-compatible)</NativeSelectOption>
+              </NativeSelect>
+            </Field>
+            <Field label="Tên" htmlFor="p-name">
+              <Input
+                id="p-name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                required
+                maxLength={100}
+              />
+            </Field>
+            <Field label="Base URL" htmlFor="p-url">
+              <Input
+                id="p-url"
+                value={form.baseUrl}
+                onChange={(e) => {
+                  setForm({ ...form, baseUrl: e.target.value });
+                  setPreset(presetFor(e.target.value));
+                }}
+                required
+                readOnly={preset !== 'custom'}
+                className={preset !== 'custom' ? 'bg-muted/50 text-muted-foreground' : undefined}
+                placeholder="https://openrouter.ai/api/v1"
+              />
+            </Field>
+            <Field
+              label={
+                <>
+                  API key
+                  {current?.keyUrl && (
+                    <a
+                      href={current.keyUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-auto inline-flex items-center gap-1 text-xs font-normal"
+                    >
+                      Lấy key
+                      <ExternalLink className="size-3" />
+                    </a>
+                  )}
+                </>
+              }
+              htmlFor="p-key"
+            >
+              <Input
+                id="p-key"
+                value={form.apiKey}
+                onChange={(e) => {
+                  setForm({ ...form, apiKey: e.target.value });
+                  clearModels();
+                  setCheck(null);
+                }}
+                type="password"
+                autoComplete="new-password"
+                placeholder={form.id ? 'Để trống = giữ key cũ' : preset === 'ollama' ? 'Không cần key' : 'Dán API key'}
+              />
+            </Field>
+
+            <div className="grid gap-2 md:col-span-2">
+              <Label htmlFor="p-model">Model</Label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="min-w-0 flex-1">
+                  {visible.length ? (
+                    <NativeSelect
+                      id="p-model"
+                      className="font-mono text-xs"
+                      value={form.model}
+                      onChange={(e) => setForm({ ...form, model: e.target.value })}
+                      required
+                    >
+                      {visible.map((m) => {
+                        const p = probes[m];
+                        return (
+                          <NativeSelectOption
+                            key={m}
+                            value={m}
+                            title={p && p !== 'pending' && !p.ok ? p.detail : undefined}
+                          >
+                            {mark(m)}
+                          </NativeSelectOption>
+                        );
+                      })}
+                    </NativeSelect>
+                  ) : (
+                    <Input
+                      id="p-model"
+                      value={form.model}
+                      onChange={(e) => setForm({ ...form, model: e.target.value })}
+                      required
+                      placeholder="Bấm “Quét model” hoặc gõ tên"
+                    />
+                  )}
+                </div>
+                <Button type="button" variant="outline" onClick={scan} disabled={!form.baseUrl || busy !== ''}>
+                  {busy === 'scan' ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+                  {busy === 'scan' ? 'Đang quét…' : 'Quét model'}
+                </Button>
+                {models.length > 0 && (
+                  <Button type="button" variant="outline" onClick={probeAll} disabled={busy !== ''}>
+                    {busy === 'probe' ? <Loader2 className="animate-spin" /> : <SlidersHorizontal />}
+                    {busy === 'probe' ? `Đang thử ${done.length}/${models.length}…` : 'Lọc model dùng được'}
+                  </Button>
+                )}
+              </div>
+              {models.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {models.length} model chat{hidden ? ` (đã ẩn ${hidden} model embedding/ảnh/âm thanh)` : ''}.
+                  {probed && busy !== 'probe' && (
+                    <>
+                      {' '}
+                      Dùng được {okCount}/{models.length}.{' '}
+                      <button
+                        type="button"
+                        className="text-primary hover:underline"
+                        onClick={() => setShowFailed(!showFailed)}
+                      >
+                        {showFailed ? 'Chỉ hiện model dùng được' : 'Hiện cả model lỗi'}
+                      </button>
+                    </>
+                  )}
+                  {!probed && ' Bấm “Lọc model dùng được” để gọi thử từng model (mỗi model tốn ~10 token).'}
+                </p>
+              )}
+            </div>
+
+            <Field label="Ưu tiên" htmlFor="p-priority">
+              <Input
+                id="p-priority"
+                type="number"
+                value={form.priority}
+                onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
+              />
+            </Field>
+            <div className="flex items-center gap-3 self-end pb-2">
+              <Switch id="p-enabled" checked={form.enabled} onCheckedChange={(v) => setForm({ ...form, enabled: v })} />
+              <Label htmlFor="p-enabled" className="font-normal">
+                Bật provider
+              </Label>
+            </div>
+
+            <div className="flex flex-wrap gap-2 md:col-span-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={testDraft}
+                disabled={!form.baseUrl || !form.model || busy !== ''}
+              >
+                {busy === 'test' ? <Loader2 className="animate-spin" /> : <FlaskConical />}
+                {busy === 'test' ? 'Đang kiểm tra…' : 'Test kết nối'}
+              </Button>
+              <Button type="submit">{form.id ? 'Lưu provider' : 'Thêm provider'}</Button>
+              {form.id && (
+                <Button type="button" variant="ghost" onClick={resetForm}>
+                  Huỷ
+                </Button>
+              )}
+            </div>
+
+            {check && (
+              <div className="md:col-span-2">
+                <CheckResult check={check} quotaUrl={current?.quotaUrl} />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </form>
+    </Page>
   );
 }
 
 function CheckResult({ check, quotaUrl }: { check: TestResponse; quotaUrl?: string }) {
   const r = check.result;
   return (
-    <div className="card" style={{ marginTop: 16, maxWidth: 900 }}>
-      <p>
-        <span className={`badge ${check.ok ? '' : 'error'}`}>{check.ok ? 'Kết nối OK' : 'Lỗi'}</span>{' '}
-        {!check.ok && check.detail}
-      </p>
+    <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        {check.ok ? (
+          <Badge variant="secondary" className="bg-success/10 text-success">
+            Kết nối OK
+          </Badge>
+        ) : (
+          <Badge variant="destructive">Lỗi</Badge>
+        )}
+        {!check.ok && <span className="text-destructive">{check.detail}</span>}
+      </div>
       {r && (
-        <dl style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, 220px) 1fr', gap: '6px 12px', margin: 0 }}>
-          <dt>Model trả lời</dt>
-          <dd>{r.model}</dd>
-          <dt>Độ trễ</dt>
-          <dd>{fmt(r.latencyMs)} ms</dd>
-          <dt>Token lần test này</dt>
-          <dd>
+        <dl className="grid grid-cols-[minmax(140px,220px)_1fr] gap-x-4 gap-y-2 text-sm">
+          <dt className="text-muted-foreground">Model trả lời</dt>
+          <dd className="font-mono text-xs">{r.model}</dd>
+          <dt className="text-muted-foreground">Độ trễ</dt>
+          <dd className="tabular-nums">{fmt(r.latencyMs)} ms</dd>
+          <dt className="text-muted-foreground">Token lần test này</dt>
+          <dd className="tabular-nums">
             {fmt(r.tokensIn)} vào + {fmt(r.tokensOut)} ra
           </dd>
           {r.rateLimit?.remainingTokens != null && (
             <>
-              <dt>Token còn lại (phút này)</dt>
-              <dd>
+              <dt className="text-muted-foreground">Token còn lại (phút này)</dt>
+              <dd className="tabular-nums">
                 {fmt(r.rateLimit.remainingTokens)} / {fmt(r.rateLimit.limitTokens)}
               </dd>
             </>
           )}
           {r.rateLimit?.remainingRequests != null && (
             <>
-              <dt>Request còn lại</dt>
-              <dd>
+              <dt className="text-muted-foreground">Request còn lại</dt>
+              <dd className="tabular-nums">
                 {fmt(r.rateLimit.remainingRequests)} / {fmt(r.rateLimit.limitRequests)}
               </dd>
             </>
           )}
           {r.credits && (
             <>
-              <dt>Credit đã dùng</dt>
-              <dd>${r.credits.usage ?? 0}</dd>
-              <dt>Credit còn lại</dt>
-              <dd>{r.credits.remaining == null ? 'không giới hạn' : `$${r.credits.remaining} / $${r.credits.limit}`}</dd>
+              <dt className="text-muted-foreground">Credit đã dùng</dt>
+              <dd className="tabular-nums">${r.credits.usage ?? 0}</dd>
+              <dt className="text-muted-foreground">Credit còn lại</dt>
+              <dd className="tabular-nums">
+                {r.credits.remaining == null ? 'không giới hạn' : `$${r.credits.remaining} / $${r.credits.limit}`}
+              </dd>
             </>
           )}
           {!r.rateLimit && !r.credits && (
             <>
-              <dt>Hạn mức còn lại</dt>
-              <dd className="muted">
+              <dt className="text-muted-foreground">Hạn mức còn lại</dt>
+              <dd className="text-muted-foreground">
                 Provider không trả về qua API.{' '}
                 {quotaUrl && (
                   <a href={quotaUrl} target="_blank" rel="noreferrer">
