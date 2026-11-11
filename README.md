@@ -66,7 +66,7 @@ pnpm start:dev                    # tự áp dụng migration khi khởi động
 - Swagger: http://localhost:3000/api/docs
 - Health: http://localhost:3000/health
 
-Migration được áp dụng tự động mỗi lần server khởi động (kể cả `pnpm start`); `pnpm db:migrate` chỉ còn để chạy tay khi cần.
+Migration được áp dụng tự động mỗi lần server khởi động (kể cả `pnpm start`); `pnpm db:migrate` chỉ còn để chạy tay khi cần. Cả hai đi qua `src/db/run-migrations.ts`, giữ advisory lock của PostgreSQL nên chạy nhiều instance hoặc chạy tay cùng lúc server khởi động không áp trùng migration.
 
 Trang setup chỉ hoạt động khi DB chưa có user. Khi deploy, đặt `SETUP_TOKEN` trong `.env` trước khi chạy rồi nhập token đó ở `/admin/setup`; nếu để trống, chỉ máy local (127.0.0.1) mới tạo được admin. Tên đăng nhập 3–32 ký tự (chữ, số, `.`, `_`, `-`), mật khẩu từ 6 ký tự.
 

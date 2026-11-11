@@ -1,3 +1,7 @@
+# When the app runs from a read-only code folder (e.g. Vane), pnpm 11 would try to re-install
+# before `pnpm start` if it thinks dependencies are stale, fail with EROFS and crash-loop.
+verifyDepsBeforeRun: false
+
 allowBuilds:
   '@scarf/scarf': false
   argon2: true

@@ -9,9 +9,10 @@ import { setDefaultResultOrder } from 'node:dns';
 import { existsSync } from 'node:fs';
 import { setDefaultAutoSelectFamily } from 'node:net';
 import { join } from 'node:path';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import type { Pool } from 'pg';
 import { AppModule } from './app.module';
-import { DRIZZLE, Db } from './db/db.module';
+import { PG_POOL } from './db/db.module';
+import { runMigrations } from './db/run-migrations';
 
 // Networks that advertise IPv6 without routing it make fetch() to LLM/Meta APIs
 // time out. Node's happy-eyeballs gives each address only 250 ms, so a slow IPv4
@@ -24,7 +25,7 @@ async function bootstrap() {
   const logger = app.get(Logger);
   app.useLogger(logger);
 
-  await migrate(app.get<Db>(DRIZZLE), { migrationsFolder: join(__dirname, 'db', 'migrations') });
+  await runMigrations(app.get<Pool>(PG_POOL), join(__dirname, 'db', 'migrations'));
   logger.log('Database migrations applied');
 
   app.use(cookieParser());
