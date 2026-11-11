@@ -55,8 +55,8 @@ const GENERATE_PROMPT = [
   'Chỉ dùng thông tin có trong tài liệu, không bịa thêm giá, chính sách hay số liệu.',
   'Mỗi rule là một chủ đề khách hay hỏi. Trả lời CHỈ bằng một mảng JSON, không giải thích, dạng:',
   '[{"name":"Tên chủ đề ngắn","keywords":["cụm từ 1","cụm từ 2"],"answer":"Câu trả lời gửi khách"}]',
-  'Quy tắc keyword: 2-4 cụm, mỗi cụm 2-4 từ tiếng Việt có dấu mà khách hay gõ khi hỏi chủ đề đó (ví dụ "phí ship", "giao hàng").',
-  'Bot chỉ trả lời khi tin nhắn chứa ít nhất 60% số keyword, nên các keyword phải là cách nói thường đi cùng nhau, không liệt kê nhiều từ đồng nghĩa.',
+  'Quy tắc keyword: 4-10 cụm, mỗi cụm 2-4 từ tiếng Việt có dấu, là các cách khác nhau khách hay gõ khi hỏi chủ đề đó (ví dụ "phí ship", "tiền ship", "ship bao nhiêu", "phí vận chuyển").',
+  'Bot trả lời khi tin nhắn chứa MỘT trong các keyword, nên hãy liệt kê đủ từ đồng nghĩa và cách hỏi ngắn; không dùng cụm quá chung có thể khớp nhầm chủ đề khác. Không cần thêm bản không dấu hay viết tắt (bot tự xử lý).',
   'Câu trả lời lịch sự, ngắn gọn, xưng "em" gọi khách là "anh/chị".',
   'Nếu tài liệu không có thông tin hỏi-đáp nào, trả về [].',
 ].join('\n');
@@ -128,23 +128,25 @@ export function cleanQuickReplies(items: string[]): string[] {
   return [...new Set(items.map((q) => q.trim()).filter(Boolean))];
 }
 
-/** Returns matched keyword count, or 0 when the rule must not answer. */
+/**
+ * Keywords are alternative ways a customer asks about the rule's topic, so one hit is enough.
+ * Returns the word count of the longest keyword found (a longer hit is a more specific match),
+ * or 0 when the rule must not answer. In `contains` mode a single-word keyword never matches on
+ * its own: without accents one word is too ambiguous ("quan" = quần / quán / quan tâm).
+ */
 export function scoreRule(text: string, rule: RuleCandidate): number {
   const normalized = normalizeText(text);
-  const keywords = rule.keywords.map(normalizeText).filter((k) => k.length >= 3);
-  if (!keywords.length) return 0;
-  let matched = 0;
-  let matchedWords = 0;
-  for (const keyword of keywords) {
-    const hit = rule.matchMode === 'exact' ? normalized === keyword : containsWords(normalized, keyword);
-    if (hit) {
-      matched += 1;
-      matchedWords += keyword.split(' ').length;
-    }
+  const exact = rule.matchMode === 'exact';
+  let best = 0;
+  for (const raw of rule.keywords) {
+    const keyword = normalizeText(raw);
+    if (keyword.length < 3) continue;
+    const words = keyword.split(' ').length;
+    if (!exact && words < 2) continue;
+    const hit = exact ? normalized === keyword : containsWords(normalized, keyword);
+    if (hit && words > best) best = words;
   }
-  // Keep the old FAQ guard: at least 60% of keywords and 2 words matched.
-  if (matched === 0 || matched / keywords.length < 0.6 || matchedWords < 2) return 0;
-  return matched;
+  return best;
 }
 
 @Injectable()
@@ -463,21 +465,14 @@ export class BotService {
   matchRule(text: string, rules: RuleCandidate[]): RuleCandidate | null {
     const candidates = rules
       .filter((rule) => rule.enabled)
-      .map((rule) => {
-        const matched = scoreRule(text, rule);
-        const maxWords = Math.max(0, ...rule.keywords.map((k) => normalizeText(k).split(' ').length));
-        return { rule, matched, maxWords };
-      })
-      .filter((c) => c.matched > 0)
-      .sort((a, b) => b.rule.priority - a.rule.priority || b.matched - a.matched || b.maxWords - a.maxWords);
+      .map((rule) => ({ rule, score: scoreRule(text, rule) }))
+      .filter((c) => c.score > 0)
+      .sort((a, b) => b.rule.priority - a.rule.priority || b.score - a.score);
 
     if (!candidates.length) return null;
     const [first, second] = candidates;
-    const tied =
-      second &&
-      second.rule.priority === first.rule.priority &&
-      second.matched === first.matched &&
-      second.maxWords === first.maxWords;
+    // Same priority and equally specific hit: we cannot tell which topic was meant, let the LLM answer.
+    const tied = second && second.rule.priority === first.rule.priority && second.score === first.score;
     return tied ? null : first.rule;
   }
 

@@ -317,7 +317,7 @@ resolve(bot, conversation, text) -> { text, source }
           nếu fallback_count >= bot.pause_after_fallbacks → conversation.mode='human'
 ```
 
-Chuẩn hoá tiếng Việt để so khớp: lowercase → NFC → bỏ dấu câu → gộp khoảng trắng → **bỏ dấu** (accent-insensitive), có kiểm tra ranh giới từ. Lý do bỏ dấu: khách Việt gõ không dấu rất thường. Bù rủi ro bằng: keyword phải ≥3 ký tự, `contains` chỉ khớp theo ranh giới từ, hoà điểm thì nhường LLM (giữ nguyên ngưỡng của code cũ: ≥2 từ, ≥60%).
+Chuẩn hoá tiếng Việt để so khớp: lowercase → NFC → bỏ dấu câu → gộp khoảng trắng → **bỏ dấu** (accent-insensitive), có kiểm tra ranh giới từ. Lý do bỏ dấu: khách Việt gõ không dấu rất thường. Bù rủi ro bằng: keyword phải ≥3 ký tự, `contains` chỉ khớp theo ranh giới từ, hoà điểm thì nhường LLM. Mỗi keyword là một cách hỏi thay thế (khớp 1 keyword ≥2 từ là đủ, keyword dài hơn được ưu tiên); ngưỡng ≥60% số keyword của code cũ đã bỏ vì nó buộc rule chỉ có 1 keyword, không phủ được từ đồng nghĩa/cách viết khác.
 
 ### 7.3. Outbound + trạng thái
 

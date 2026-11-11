@@ -703,7 +703,7 @@ function RuleDialog(props: {
                 onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
               />
             </Field>
-            <Field label="Keyword" htmlFor="r-keywords" hint="Phân cách bằng dấu phẩy, ví dụ: phí ship, giao hàng, ship cod" className="sm:col-span-2">
+            <Field label="Keyword" htmlFor="r-keywords" hint="Các cách khách hay hỏi, phân cách bằng dấu phẩy; tin nhắn chứa 1 cụm là khớp. Mỗi cụm ≥2 từ, ví dụ: phí ship, tiền ship, ship bao nhiêu. Không cần gõ thêm bản không dấu hay viết tắt." className="sm:col-span-2">
               <Input
                 id="r-keywords"
                 value={form.keywords}

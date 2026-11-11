@@ -25,8 +25,23 @@ const ABBREVIATIONS: Record<string, string> = {
   bn: 'bao nhieu',
   bnh: 'bao nhieu',
   bnhieu: 'bao nhieu',
+  bnhiu: 'bao nhieu',
   baonhieu: 'bao nhieu',
   nhiu: 'nhieu',
+  // Teencode spellings that no other word shares in a shop chat.
+  fi: 'phi',
+  sip: 'ship',
+  sl: 'so luong',
+  kthuoc: 'kich thuoc',
+  kmai: 'khuyen mai',
+  ctkm: 'chuong trinh khuyen mai',
+  mgg: 'ma giam gia',
+  somi: 'so mi',
+  smi: 'so mi',
+  jin: 'jean',
+  jeans: 'jean',
+  hoodi: 'hoodie',
+  hudi: 'hoodie',
   ntn: 'nhu the nao',
   sp: 'san pham',
   tg: 'thoi gian',
@@ -71,8 +86,17 @@ export function normalizeText(input: string): string {
     .replace(/([a-z])\1{2,}/g, '$1')
     .split(/\s+/)
     .filter(Boolean)
-    .map((word) => ABBREVIATIONS[word] ?? word)
+    .map((word) => ABBREVIATIONS[word] ?? ABBREVIATIONS[squashDoubledEnd(word)] ?? squashDoubledEnd(word))
     .join(' ');
+}
+
+/**
+ * Vietnamese never ends a word on a doubled consonant, so "shipp" / "sipp" mean "ship".
+ * Short words are left alone: "kk" (haha) must not become "k" (= không), "mgg" is shorthand.
+ * Vowels stay ("xoong", "free").
+ */
+function squashDoubledEnd(word: string): string {
+  return word.length >= 4 ? word.replace(/([b-df-hj-np-tv-z])\1$/, '$1') : word;
 }
 
 /** True when `needle` occurs in `haystack` on word boundaries. */

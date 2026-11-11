@@ -22,6 +22,8 @@ describe('normalizeText', () => {
     expect(normalizeText('ship ko? ck dc hk')).toBe('ship khong chuyen khoan duoc khong');
     expect(normalizeText('freeship k ạaaa')).toBe('mien phi ship khong a');
     expect(normalizeText('shipppp 1000đ')).toBe('ship 1000d');
+    expect(normalizeText('fí síp bnhiu')).toBe('phi ship bao nhieu');
+    expect(normalizeText('somi, quần jin, hudi')).toBe('so mi quan jean hoodie');
   });
 
   it('is idempotent, since matching normalizes already-normalized text again', () => {

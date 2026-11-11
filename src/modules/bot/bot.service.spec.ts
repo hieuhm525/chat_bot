@@ -22,16 +22,32 @@ describe('scoreRule', () => {
     expect(scoreRule('abc', rule({ keywords: ['ab'] }))).toBe(0);
   });
 
-  it('requires 60% of keywords', () => {
-    const r = rule({ keywords: ['giao hàng', 'phí ship', 'hỏa tốc'] });
+  it('treats keywords as alternatives: one hit is enough', () => {
+    const r = rule({ keywords: ['phí ship', 'tiền ship', 'ship bao nhiêu', 'phí vận chuyển'] });
+    expect(scoreRule('tien ship sao shop', r)).toBeGreaterThan(0);
+    expect(scoreRule('ship bn vậy', r)).toBeGreaterThan(0);
+    expect(scoreRule('phí vận chuyển ra sao', r)).toBeGreaterThan(0);
     expect(scoreRule('giao hàng thế nào', r)).toBe(0);
-    expect(scoreRule('giao hàng và phí ship', r)).toBeGreaterThan(0);
   });
 
-  it('answers abbreviated and unaccented messages', () => {
-    const r = rule({ keywords: ['phí ship', 'bao nhiêu'] });
+  it('scores the longest keyword hit, so a more specific match wins', () => {
+    const r = rule({ keywords: ['mở cửa', 'giờ mở cửa'] });
+    expect(scoreRule('giờ mở cửa', r)).toBe(3);
+    expect(scoreRule('mấy giờ shop mở cửa', r)).toBe(2);
+  });
+
+  it('allows single-word keywords only in exact mode', () => {
+    expect(scoreRule('menu', rule({ keywords: ['menu'] }))).toBe(0);
+    expect(scoreRule('Menu!', rule({ keywords: ['menu'], matchMode: 'exact' }))).toBe(1);
+    expect(scoreRule('xem menu', rule({ keywords: ['menu'], matchMode: 'exact' }))).toBe(0);
+  });
+
+  it('answers abbreviated, teencode and unaccented messages', () => {
+    const r = rule({ keywords: ['phí ship'] });
     expect(scoreRule('phi ship bn vay shop', r)).toBeGreaterThan(0);
-    expect(scoreRule('fí shipp bnh', r)).toBe(0); // "fí" is not "phí": no guessing at misspellings
+    expect(scoreRule('fí shipp bnh', r)).toBeGreaterThan(0);
+    expect(scoreRule('fi sip sao shop', r)).toBeGreaterThan(0);
+    expect(scoreRule('phi shjp', r)).toBe(0); // random typos are not guessed
     const transfer = rule({ keywords: ['chuyển khoản', 'số tài khoản'] });
     expect(scoreRule('cho e xin stk de ck', transfer)).toBeGreaterThan(0);
   });
