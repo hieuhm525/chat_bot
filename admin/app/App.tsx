@@ -5,19 +5,19 @@ import { Loading } from '@/components/page';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { api } from './api';
-import { Login } from './routes/login';
-import { Register } from './routes/register';
-import { Setup, SetupStatus } from './routes/setup';
+import { Login } from './routes/auth/login';
+import { Register } from './routes/auth/register';
+import { Setup, SetupStatus } from './routes/auth/setup';
 
 // Each area only downloads its own screens; admin pages never ship to shop owners and vice versa.
-const Dashboard = lazy(() => import('./routes/dashboard').then((m) => ({ default: m.Dashboard })));
-const Conversations = lazy(() => import('./routes/conversations').then((m) => ({ default: m.Conversations })));
-const Channels = lazy(() => import('./routes/channels').then((m) => ({ default: m.Channels })));
-const Bots = lazy(() => import('./routes/bot').then((m) => ({ default: m.Bots })));
-const BotDetail = lazy(() => import('./routes/bot-detail').then((m) => ({ default: m.BotDetail })));
-const RuleImport = lazy(() => import('./routes/rule-import').then((m) => ({ default: m.RuleImport })));
-const Tenants = lazy(() => import('./routes/tenants').then((m) => ({ default: m.Tenants })));
-const Providers = lazy(() => import('./routes/providers').then((m) => ({ default: m.Providers })));
+const Dashboard = lazy(() => import('./routes/app/dashboard').then((m) => ({ default: m.Dashboard })));
+const Conversations = lazy(() => import('./routes/app/conversations').then((m) => ({ default: m.Conversations })));
+const Channels = lazy(() => import('./routes/app/channels').then((m) => ({ default: m.Channels })));
+const Bots = lazy(() => import('./routes/app/bots').then((m) => ({ default: m.Bots })));
+const BotDetail = lazy(() => import('./routes/app/bot-detail').then((m) => ({ default: m.BotDetail })));
+const RuleImport = lazy(() => import('./routes/app/rule-import').then((m) => ({ default: m.RuleImport })));
+const Tenants = lazy(() => import('./routes/admin/tenants').then((m) => ({ default: m.Tenants })));
+const Providers = lazy(() => import('./routes/admin/providers').then((m) => ({ default: m.Providers })));
 
 export interface User {
   id: string;

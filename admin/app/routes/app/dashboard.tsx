@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowDownLeft, ArrowUpRight, MessagesSquare, UserRound } from 'lucide-react';
-import { api } from '../api';
+import { api } from '../../api';
 import { LoadError, Loading, Page, PageHeader } from '@/components/page';
 import { Card, CardContent } from '@/components/ui/card';
 

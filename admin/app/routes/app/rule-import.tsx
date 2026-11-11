@@ -1,8 +1,8 @@
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, FileText, Loader2, Save, Sparkles, Table2, TriangleAlert, Upload } from 'lucide-react';
-import { api } from '../api';
-import { findOverlaps, Overlap } from '../../../src/common/rule-overlap';
+import { api } from '../../api';
+import { findOverlaps, Overlap } from '../../../../src/common/rule-overlap';
 import { Notices, Page, PageHeader, Section, TableCard } from '@/components/page';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';

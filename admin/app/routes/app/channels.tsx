@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Check, ChevronRight, Copy as CopyIcon, ExternalLink, Loader2, Menu, PlugZap, Plus, Trash2, TriangleAlert, X } from 'lucide-react';
-import { api } from '../api';
+import { api } from '../../api';
 import { toast } from 'sonner';
 import { useDialogs } from '@/components/dialogs';
 import { Field, LoadError, Loading, Notices, Page, PageHeader, TableCard } from '@/components/page';

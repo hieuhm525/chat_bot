@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ExternalLink, FlaskConical, Loader2, Pencil, PlugZap, Plus, ScanSearch, Trash2 } from 'lucide-react';
-import { api } from '../api';
+import { api } from '../../api';
 import { useDialogs } from '@/components/dialogs';
 import { Field, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';

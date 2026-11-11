@@ -144,9 +144,3 @@ export function DialogsProvider({ children }: { children: ReactNode }) {
     </DialogsContext.Provider>
   );
 }
-
-/** Scrolls an element into view, without animation for visitors who asked for reduced motion. */
-export function scrollToId(id: string) {
-  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  document.getElementById(id)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
-}

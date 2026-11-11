@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, Plus, Settings2, Trash2 } from 'lucide-react';
-import { api } from '../api';
+import { api } from '../../api';
 import { useDialogs } from '@/components/dialogs';
 import { Field, LoadError, Loading, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';

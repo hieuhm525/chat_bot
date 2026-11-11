@@ -1,7 +1,7 @@
 import { FormEvent, UIEvent, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Bot, ChevronUp, Filter, Hand, Loader2, MessagesSquare, Search, Send, Undo2, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '../api';
+import { api } from '../../api';
 import { Notices } from '@/components/page';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';

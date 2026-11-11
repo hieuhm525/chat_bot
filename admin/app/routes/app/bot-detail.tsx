@@ -15,9 +15,9 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { Agent } from './bot';
-import { api } from '../api';
-import { normalizeText } from '../../../src/common/normalize-text';
+import { Agent } from './bots';
+import { api } from '../../api';
+import { normalizeText } from '../../../../src/common/normalize-text';
 import { useDialogs } from '@/components/dialogs';
 import { Field, LoadError, Loading, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';

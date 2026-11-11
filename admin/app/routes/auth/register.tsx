@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { api } from '../api';
-import type { User } from '../App';
+import { api } from '../../api';
+import type { User } from '../../App';
 import { AuthShell } from '@/components/auth-shell';
 import { Field, Loading, Notices } from '@/components/page';
 import { Button } from '@/components/ui/button';
