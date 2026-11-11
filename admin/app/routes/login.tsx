@@ -1,12 +1,22 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
 import type { User } from '../App';
+import type { SignupStatus } from './register';
 
 export function Login({ onLogin }: { onLogin: (user: User) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [signup, setSignup] = useState(false);
+
+  useEffect(() => {
+    if (!window.location.pathname.startsWith('/app')) return;
+    api<SignupStatus>('/signup/status')
+      .then((s) => setSignup(s.enabled))
+      .catch(() => setSignup(false));
+  }, []);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -65,6 +75,11 @@ export function Login({ onLogin }: { onLogin: (user: User) => void }) {
           <button type="submit" className="btn-primary" disabled={busy}>
             {busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
           </button>
+          {signup && (
+            <p className="auth-intro">
+              Chưa có tài khoản? <Link to="/register">Đăng ký dùng thử</Link>
+            </p>
+          )}
           </form>
         </div>
       </main>

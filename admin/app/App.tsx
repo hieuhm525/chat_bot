@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes } from 'react-router-dom';
 import { api } from './api';
 import { Login } from './routes/login';
+import { Register } from './routes/register';
 import { Setup, SetupStatus } from './routes/setup';
 import { Dashboard } from './routes/dashboard';
 import { Conversations } from './routes/conversations';
@@ -79,6 +80,9 @@ export function App() {
     return (
       <Routes>
         <Route path="/login" element={<Login onLogin={(u) => setBoot({ user: u, setup: null })} />} />
+        {area === 'app' && (
+          <Route path="/register" element={<Register onLogin={(u) => setBoot({ user: u, setup: null })} />} />
+        )}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );

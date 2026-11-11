@@ -676,6 +676,8 @@ describe('bv-agent-msg e2e', () => {
       '/api/v1/auth/me': ['admin', 'owner', 'agent'],
       '/api/v1/setup/status': 'public',
       '/api/v1/setup': 'public',
+      '/api/v1/signup/status': 'public',
+      '/api/v1/signup': 'public',
       '/api/v1/tenants': ['admin'],
       '/api/v1/tenants/:id': ['admin'],
       '/api/v1/tenants/:id/suspend': ['admin'],
@@ -1648,6 +1650,7 @@ describe('bv-agent-msg e2e', () => {
           path.startsWith('/api/v1/llm-providers') ||
           path.startsWith('/api/v1/auth') ||
           path.startsWith('/api/v1/setup') ||
+          path.startsWith('/api/v1/signup') ||
           path === '/api/v1/customers'
         ) {
           continue;

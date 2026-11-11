@@ -65,6 +65,16 @@ export class Env {
   @IsString()
   SETUP_TOKEN = '';
 
+  /** Public self-service tenant sign-up at /app/register. Keep off unless you want open registration. */
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  ALLOW_SIGNUP = 'false';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  SIGNUP_TRIAL_DAYS = 14;
+
   @IsOptional()
   @IsString()
   LOG_LEVEL = 'info';
