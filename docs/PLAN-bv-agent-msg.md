@@ -1,6 +1,6 @@
 # bv-agent-msg — Kế hoạch chi tiết + biên bản phản biện
 
-> Phiên bản: v1 · 09/11/2026 · Trạng thái: **kế hoạch, chưa viết code**
+> Phiên bản: v1 · 09/11/2026 · Trạng thái: **đã triển khai; tài liệu lịch sử, code là nguồn đúng**
 > Thay thế `PLAN.md`, `PROD_PLAN.md`, `LOCAL_PLAN.md` (những file đó mô tả bot FastAPI 1 Page).
 > Tài liệu này là đầu vào để triển khai từng phase, không phải hợp đồng bất biến.
 

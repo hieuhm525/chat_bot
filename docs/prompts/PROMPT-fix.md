@@ -1,6 +1,6 @@
 # Prompt: sửa codebase cho đúng mô hình cho thuê AI agent
 
-Đọc `docs/PROMPT.md` (yêu cầu sản phẩm), `src/db/schema.ts`, `README.md` trước khi sửa. Không viết lại những phần đã đúng: webhook + verify chữ ký, outbox worker, advisory lock, `resolve()`, lọc `workspace_id` trong service, test 404 chéo tenant.
+Đọc `docs/prompts/PROMPT.md` (yêu cầu sản phẩm), `src/db/schema.ts`, `README.md` trước khi sửa. Không viết lại những phần đã đúng: webhook + verify chữ ký, outbox worker, advisory lock, `resolve()`, lọc `workspace_id` trong service, test 404 chéo tenant.
 
 Làm lần lượt từng bước bên dưới. Mỗi bước gồm migration drizzle-kit mới (không sửa migration cũ, dữ liệu cũ phải còn), code, test. Sau mỗi bước chạy `pnpm test`, `pnpm test:e2e` và `pnpm build`, rồi báo lại những gì đã đổi. Không chuyển sang bước sau nếu test đang đỏ.
 

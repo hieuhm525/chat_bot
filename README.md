@@ -2,6 +2,41 @@
 
 Bot CSKH đa kênh (Messenger trước, Zalo OA/WhatsApp sau) — NestJS + PostgreSQL + Drizzle.
 Kế hoạch chi tiết: [`docs/PLAN-bv-agent-msg.md`](docs/PLAN-bv-agent-msg.md).
+Luồng một tin nhắn (vào/ra, trạng thái): [`docs/architecture.md`](docs/architecture.md).
+
+## Thuật ngữ
+
+- `workspace` (DB, cột `workspace_id`) = `tenant` (module `src/modules/tenants`, màn Tenants) = một shop thuê dịch vụ. Cùng một khái niệm.
+- Role `admin`: quản trị hệ thống, dùng khu vực `/admin` (`admin/app/routes/admin/`).
+- Role `owner`: chủ shop, dùng khu vực `/app` (`admin/app/routes/app/`).
+- Folder `admin/` là SPA chung cho cả hai khu vực (tên lịch sử).
+- `channel` = một kết nối Messenger/WhatsApp/Zalo; `conversation` = một luồng chat với một khách; `rule` = câu trả lời theo từ khoá; `outbox` = hàng đợi gửi tin.
+
+## Cấu trúc thư mục
+
+```
+src/
+  config/       validate env lúc khởi động
+  db/           Drizzle schema, module DB, migrations, seed
+  shared/       hàm thuần dùng chung backend + admin SPA (bundle vào trình duyệt)
+  common/       hạ tầng dùng chung backend: auth guard, decorator, crypto, uuid, tenant-status, bot-defaults
+  modules/
+    auth/           đăng nhập/đăng xuất, session cookie
+    setup/          tạo admin đầu tiên khi DB chưa có user
+    tenants/        quản lý tenant/workspace (chỉ admin)
+    llm-providers/  cấu hình provider LLM và kiểm tra key (chỉ admin)
+    bot/            AI agent, rule, resolve() rule → LLM → fallback
+    channels/       kênh + adapter từng provider (messenger, zalo, whatsapp)
+    messaging/      webhook, worker outbox, xử lý tin vào/ra, hội thoại, stats, health
+admin/app/
+  api.ts        fetch wrapper gọi /api/v1, dịch lỗi sang tiếng Việt
+  App.tsx       chọn khu vực /admin hay /app theo URL, khai báo route
+  components/   component dùng chung + shadcn/ui
+  lib/          tiện ích nhỏ (utils, quick-replies)
+  routes/admin/ màn quản trị hệ thống
+  routes/app/   màn chủ shop
+  routes/auth/  đăng nhập, đăng ký, setup
+```
 
 ## Stack
 
