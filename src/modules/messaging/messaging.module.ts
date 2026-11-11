@@ -7,7 +7,8 @@ import { OutboundService } from './outbound.service';
 import { OutboxWorker } from './outbox.worker';
 import { ConversationsController } from './conversations.controller';
 import { ConversationsService } from './conversations.service';
-import { HealthController, StatsController } from './stats.controller';
+import { StatsController } from './stats.controller';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [ChannelsModule, BotModule],
