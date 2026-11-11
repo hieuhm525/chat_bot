@@ -19,10 +19,14 @@ import { Public } from '../../common/public.decorator';
 import { Roles } from '../../common/roles.decorator';
 import { TENANT_STATUSES, TenantsService } from './tenants.service';
 
-class CreateTenantDto {
-  @IsString() @MinLength(1) @MaxLength(100) name!: string;
+const USERNAME_RULE = /^[a-zA-Z0-9._-]{3,32}$/;
+const USERNAME_MESSAGE = 'Tên đăng nhập 3-32 ký tự, chỉ gồm chữ, số, . _ -';
 
-  @IsString() @Matches(/^[a-zA-Z0-9._-]{3,32}$/, { message: 'Tên đăng nhập 3-32 ký tự, chỉ gồm chữ, số, . _ -' })
+class CreateTenantDto {
+  /** Optional: defaults to the owner's username (same as self-signup). */
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(100) name?: string;
+
+  @IsString() @Matches(USERNAME_RULE, { message: USERNAME_MESSAGE })
   username!: string;
 
   @IsString() @MinLength(6) password!: string;
@@ -60,6 +64,11 @@ class ListTenantsDto {
   status?: (typeof TENANT_STATUSES)[number];
 }
 
+class UsernameCheckDto {
+  @IsString() @Matches(USERNAME_RULE, { message: USERNAME_MESSAGE })
+  username!: string;
+}
+
 class ResetPasswordDto {
   @IsString() @MinLength(6) password!: string;
 }
@@ -72,6 +81,11 @@ export class TenantsController {
   @Get()
   list(@Query() query: ListTenantsDto) {
     return this.tenants.list({ page: query.page ?? 1, pageSize: query.pageSize ?? 20, q: query.q, status: query.status });
+  }
+
+  @Get('username-available')
+  async usernameAvailable(@Query() query: UsernameCheckDto) {
+    return { available: !(await this.tenants.isUsernameTaken(query.username)) };
   }
 
   @Post()

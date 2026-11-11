@@ -55,9 +55,19 @@ const empty = {
   expiresAt: '',
 };
 
-function toDateInput(value: string | null) {
-  return value ? new Date(value).toISOString().slice(0, 10) : '';
+/** yyyy-mm-dd in the browser's local timezone (toISOString would shift to UTC). */
+function localDate(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+
+function toDateInput(value: string | null) {
+  return value ? localDate(new Date(value)) : '';
+}
+
+const USERNAME_RE = /^[a-zA-Z0-9._-]{3,32}$/;
+
+type UsernameCheck = 'idle' | 'checking' | 'available' | 'taken' | 'error';
 
 interface TenantPage {
   items: Tenant[];
@@ -84,6 +94,51 @@ export function Tenants() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const { confirm, askPassword } = useDialogs();
+
+  // Check the username while the admin types, so a duplicate shows before submitting.
+  const creating = open && !form.id;
+  const usernameQuery = useDebounced(form.username.trim().toLowerCase(), 300);
+  const [usernameCheck, setUsernameCheck] = useState<{ value: string; state: UsernameCheck; message?: string }>({
+    value: '',
+    state: 'idle',
+  });
+  useEffect(() => {
+    if (!creating || !USERNAME_RE.test(usernameQuery)) {
+      setUsernameCheck({ value: usernameQuery, state: 'idle' });
+      return;
+    }
+    let cancelled = false;
+    setUsernameCheck({ value: usernameQuery, state: 'checking' });
+    api<{ available: boolean }>(`/tenants/username-available?${new URLSearchParams({ username: usernameQuery })}`)
+      .then((res) => {
+        if (!cancelled) setUsernameCheck({ value: usernameQuery, state: res.available ? 'available' : 'taken' });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setUsernameCheck({
+          value: usernameQuery,
+          state: 'error',
+          message: err instanceof Error ? err.message : 'Không kiểm tra được tên đăng nhập.',
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [creating, usernameQuery]);
+  // Only trust a result that matches what is currently typed (debounce lag).
+  const currentUsername = form.username.trim().toLowerCase();
+  const usernameTaken = usernameCheck.state === 'taken' && usernameCheck.value === currentUsername;
+  const usernameError = usernameTaken
+    ? `Tên đăng nhập "${currentUsername}" đã tồn tại, hãy chọn tên khác.`
+    : usernameCheck.state === 'error' && usernameCheck.value === currentUsername
+      ? usernameCheck.message
+      : undefined;
+  const usernameHint =
+    usernameCheck.value !== currentUsername || usernameCheck.state === 'checking'
+      ? USERNAME_RE.test(currentUsername) ? 'Đang kiểm tra…' : '3-32 ký tự: chữ, số, dấu chấm, gạch dưới, gạch ngang'
+      : usernameCheck.state === 'available'
+        ? 'Tên đăng nhập dùng được.'
+        : '3-32 ký tự: chữ, số, dấu chấm, gạch dưới, gạch ngang';
 
   const requestSeq = useRef(0);
   const load = async () => {
@@ -115,11 +170,11 @@ export function Tenants() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!form.id && usernameTaken) return;
     setFormError('');
     setNotice('');
     setSaving(true);
     const body: Record<string, unknown> = {
-      name: form.name,
       plan: form.plan,
       maxBots: Number(form.maxBots),
       maxChannels: Number(form.maxChannels),
@@ -127,7 +182,7 @@ export function Tenants() {
     };
     try {
       if (form.id) {
-        await api(`/tenants/${form.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        await api(`/tenants/${form.id}`, { method: 'PATCH', body: JSON.stringify({ ...body, name: form.name }) });
         setNotice('Đã lưu tenant.');
       } else {
         await api('/tenants', {
@@ -151,6 +206,9 @@ export function Tenants() {
     setFormError('');
     setOpen(true);
   };
+
+  // New tenants default to expiring today; the admin extends it when needed.
+  const openCreate = () => openForm({ ...empty, expiresAt: localDate(new Date()) });
 
   const setStatus = async (tenant: Tenant, action: 'suspend' | 'resume') => {
     if (
@@ -212,7 +270,7 @@ export function Tenants() {
         title="Tenant"
         description="Workspace của từng shop. Tenant bị khóa/hết hạn thì bot ngừng trả lời, tin nhắn đến vẫn được lưu."
         actions={
-          <Button onClick={() => openForm(empty)}>
+          <Button onClick={openCreate}>
             <Plus />
             Thêm tenant
           </Button>
@@ -358,7 +416,7 @@ export function Tenants() {
                 <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
                   <div className="space-y-3">
                     <p>Chưa có tenant. Shop tự đăng ký tại /app/register hoặc tạo ở đây.</p>
-                    <Button size="sm" onClick={() => openForm(empty)}>
+                    <Button size="sm" onClick={openCreate}>
                       <Plus />
                       Thêm tenant đầu tiên
                     </Button>
@@ -384,20 +442,23 @@ export function Tenants() {
           </DialogHeader>
           <Notices error={formError} />
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Tên shop" htmlFor="t-name">
-              <Input
-                id="t-name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-                maxLength={100}
-              />
-            </Field>
+            {form.id && (
+              <Field label="Tên shop" htmlFor="t-name">
+                <Input
+                  id="t-name"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required
+                  maxLength={100}
+                />
+              </Field>
+            )}
             {!form.id && (
               <>
-                <Field label="Tên đăng nhập" htmlFor="t-username">
+                <Field label="Tên đăng nhập" htmlFor="t-username" error={usernameError} hint={usernameHint}>
                   <Input
                     id="t-username"
+                    aria-invalid={Boolean(usernameError) || undefined}
                     value={form.username}
                     onChange={(e) => setForm({ ...form, username: e.target.value })}
                     required
@@ -459,7 +520,7 @@ export function Tenants() {
             <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={saving}>
               Huỷ
             </Button>
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving || (!form.id && usernameTaken)}>
               {saving && <Loader2 className="animate-spin" />}
               {form.id ? 'Lưu tenant' : 'Tạo tenant'}
             </Button>

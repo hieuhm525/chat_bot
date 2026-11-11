@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Check, ChevronRight, Copy as CopyIcon, ExternalLink, Loader2, Menu, PlugZap, Plus, Trash2, TriangleAlert, X } from 'lucide-react';
+import { Check, ChevronRight, Copy as CopyIcon, ExternalLink, Loader2, Menu, PlugZap, Plus, Trash2, X } from 'lucide-react';
 import { api } from '../../api';
 import { toast } from 'sonner';
 import { useDialogs } from '@/components/dialogs';
@@ -378,18 +378,6 @@ export function Channels() {
                     </li>
                   ))}
                 </ol>
-                {['localhost', '127.0.0.1'].includes(window.location.hostname) && (
-                  <div className="flex gap-3 border-t pt-4 text-sm">
-                    <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-                    <div className="space-y-1">
-                      <p className="font-medium">Meta không gọi được tới localhost</p>
-                      <p className="text-muted-foreground">
-                        Chạy tunnel (<code>cloudflared tunnel --url http://localhost:3000</code>) rồi dán vào Meta:{' '}
-                        <code>https://&lt;url-tunnel&gt;/webhooks/messenger</code>.
-                      </p>
-                    </div>
-                  </div>
-                )}
               </div>
             </details>
             <Notices error={formError} />

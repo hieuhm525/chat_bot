@@ -15,7 +15,8 @@ export interface TenantListQuery {
 }
 
 export interface CreateTenantInput {
-  name: string;
+  /** Defaults to the owner's username. */
+  name?: string;
   username: string;
   password: string;
   plan?: string;
@@ -82,10 +83,18 @@ export class TenantsService {
     return { items, total, page: query.page, pageSize: query.pageSize };
   }
 
+  /** Usernames are stored lowercased, so the check is case-insensitive. */
+  async isUsernameTaken(username: string) {
+    const normalized = username.trim().toLowerCase();
+    const [existing] = await this.db.select({ id: users.id }).from(users).where(eq(users.username, normalized)).limit(1);
+    return Boolean(existing);
+  }
+
   async create(input: CreateTenantInput, actor: AuditActor, source: 'admin' | 'signup' = 'admin') {
     const username = input.username.trim().toLowerCase();
-    const [existing] = await this.db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
-    if (existing) throw new BadRequestException('Tên đăng nhập đã tồn tại');
+    if (await this.isUsernameTaken(username)) {
+      throw new BadRequestException(`Tên đăng nhập "${username}" đã tồn tại, hãy chọn tên khác.`);
+    }
 
     const passwordHash = await argon2.hash(input.password, { type: argon2.argon2id });
     const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
@@ -94,7 +103,7 @@ export class TenantsService {
       const [workspace] = await tx
         .insert(workspaces)
         .values({
-          name: input.name.trim(),
+          name: input.name?.trim() || username,
           plan: input.plan?.trim() || 'trial',
           maxBots: input.maxBots ?? 1,
           maxChannels: input.maxChannels ?? 1,

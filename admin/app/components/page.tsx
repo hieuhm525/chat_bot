@@ -61,7 +61,7 @@ export function Field(props: {
   children: ReactNode;
 }) {
   return (
-    <div className={cn('grid gap-2', props.className)}>
+    <div className={cn('grid content-start gap-2', props.className)}>
       <Label htmlFor={props.htmlFor}>{props.label}</Label>
       {props.children}
       {props.error ? (

@@ -703,6 +703,7 @@ describe('bv-agent-msg e2e', () => {
       '/api/v1/signup/status': 'public',
       '/api/v1/signup': 'public',
       '/api/v1/tenants': ['admin'],
+      '/api/v1/tenants/username-available': ['admin'],
       '/api/v1/tenants/:id': ['admin'],
       '/api/v1/tenants/:id/suspend': ['admin'],
       '/api/v1/tenants/:id/resume': ['admin'],
