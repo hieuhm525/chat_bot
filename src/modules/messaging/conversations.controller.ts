@@ -52,7 +52,7 @@ class ListConversationsDto {
   limit?: number;
 }
 
-@Roles('owner', 'agent')
+@Roles('owner')
 @Controller('conversations')
 export class ConversationsController {
   constructor(private readonly conversations: ConversationsService) {}

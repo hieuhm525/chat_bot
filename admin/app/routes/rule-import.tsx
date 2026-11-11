@@ -191,7 +191,7 @@ export function RuleImport() {
       );
       if (!res.items.length) setError('Không tìm thấy câu hỏi-đáp nào trong tài liệu.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi tạo nháp');
+      setError(err instanceof Error ? err.message : 'AI không tạo được nháp, thử lại hoặc rút gọn tài liệu.');
     } finally {
       setBusy(false);
     }
@@ -240,7 +240,7 @@ export function RuleImport() {
       });
       navigate(`/bots/${botId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi lưu rule');
+      setError(err instanceof Error ? err.message : 'Không lưu được rule.');
       setBusy(false);
     }
   };
@@ -286,7 +286,7 @@ export function RuleImport() {
               />
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <FilePick label="Chọn file .txt / .md" accept=".txt,.md,text/plain,text/markdown" onChange={(e) => readFile(e, setDoc)} />
-                <span className="text-xs text-muted-foreground tabular-nums">{doc.length.toLocaleString()} / 30.000 ký tự</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{doc.length.toLocaleString('vi-VN')} / 30.000 ký tự</span>
               </div>
               <Button onClick={generate} disabled={busy || !doc.trim()}>
                 {busy ? <Loader2 className="animate-spin" /> : <Sparkles />}

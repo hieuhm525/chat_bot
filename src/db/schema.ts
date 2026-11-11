@@ -47,7 +47,7 @@ export const users = pgTable(
     disabledAt: timestamp('disabled_at', { withTimezone: true }),
     createdAt,
   },
-  (t) => [check('users_role_check', sql`${t.role} in ('admin','owner','agent')`)],
+  (t) => [check('users_role_check', sql`${t.role} in ('admin','owner')`)],
 );
 
 export const sessions = pgTable(
@@ -75,6 +75,10 @@ export const bots = pgTable('bots', {
   llmEnabled: boolean('llm_enabled').notNull().default(true),
   systemPrompt: text('system_prompt').notNull().default(DEFAULT_SYSTEM_PROMPT),
   pauseAfterFallbacks: integer('pause_after_fallbacks').notNull().default(3),
+  /** Buttons shown under the greeting; tapping one sends its title as a normal message. */
+  greetingQuickReplies: text('greeting_quick_replies').array().notNull().default(sql`'{}'::text[]`),
+  /** Sent when the LLM is slow so the customer knows the bot is working; empty turns it off. */
+  waitMessage: text('wait_message').notNull().default('Dạ anh/chị chờ em một chút, em đang kiểm tra thông tin ạ.'),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt,
   updatedAt,
@@ -269,6 +273,8 @@ export const botRules = pgTable(
     matchMode: text('match_mode').notNull().default('contains'),
     priority: integer('priority').notNull().default(0),
     answer: text('answer').notNull(),
+    /** Buttons shown under the answer (Messenger quick replies). */
+    quickReplies: text('quick_replies').array().notNull().default(sql`'{}'::text[]`),
     enabled: boolean('enabled').notNull().default(true),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt,

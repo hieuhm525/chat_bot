@@ -4,7 +4,7 @@ export interface AuthUser {
   id: string;
   workspaceId: string;
   username: string;
-  role: 'admin' | 'owner' | 'agent';
+  role: 'admin' | 'owner';
 }
 
 export const CurrentUser = createParamDecorator(

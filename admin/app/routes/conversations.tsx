@@ -1,8 +1,9 @@
 import { FormEvent, UIEvent, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Bot, ChevronUp, Filter, Hand, Loader2, MessagesSquare, Search, Send, Undo2 } from 'lucide-react';
+import { ArrowLeft, Bot, ChevronUp, Filter, Hand, Loader2, MessagesSquare, Search, Send, Undo2, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api';
 import { Notices } from '@/components/page';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -16,10 +17,12 @@ interface ConversationSummary {
   mode: string;
   customerName: string | null;
   externalUserId: string;
+  customerAvatarUrl: string | null;
   channelName: string;
   botName: string | null;
   assignedUserName: string | null;
   lastMessage: string | null;
+  lastSenderType: Message['senderType'] | null;
   lastMessageAt: string | null;
 }
 
@@ -41,7 +44,7 @@ interface Detail {
   fallbackCount: number;
   botName: string | null;
   assignedUserName: string | null;
-  customer: { displayName: string | null; externalUserId: string };
+  customer: { displayName: string | null; externalUserId: string; profile: { avatarUrl?: string | null } | null };
   channel: { id: string; name: string; provider: string } | null;
   messages: Message[];
 }
@@ -67,23 +70,24 @@ interface Filters {
   search: string;
 }
 
-const EMPTY_FILTERS: Filters = {
-  channelId: '',
-  botId: '',
-  mode: '',
-  assignedUserId: '',
-  from: '',
-  to: '',
-  search: '',
-};
+/** Today as YYYY-MM-DD in the viewer's local timezone (toISOString would give the UTC date). */
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
-const MODE_LABEL: Record<string, string> = { bot: 'Bot', human: 'Người thật', off: 'Đã tắt' };
+function defaultFilters(): Filters {
+  const day = today();
+  return { channelId: '', botId: '', mode: '', assignedUserId: '', from: day, to: day, search: '' };
+}
+
+const MODE_LABEL: Record<string, string> = { bot: 'Bot', human: 'Người trả lời', off: 'Đã tắt' };
 
 const SOURCE_LABEL: Record<string, string> = {
   rule: 'Rule',
   llm: 'AI (LLM)',
   fallback: 'Câu trả lời mặc định',
-  agent: 'Nhân viên',
+  agent: 'Shop',
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -110,10 +114,21 @@ const MODE_CLASS: Record<string, string> = {
 };
 
 const BUBBLE: Record<Message['senderType'], string> = {
-  customer: 'self-start bg-card',
-  bot: 'self-end border-primary/20 bg-accent',
-  agent: 'self-end border-success/25 bg-success/10',
-  system: 'self-center bg-muted text-xs',
+  customer: 'bg-card',
+  bot: 'border-primary/20 bg-accent',
+  agent: 'border-success/25 bg-success/10',
+  system: 'bg-muted text-xs',
+};
+
+/** Who answered: shown on every outbound bubble so bot and human replies never look alike. */
+const REPLY_TAG: Partial<Record<Message['senderType'], { label: string; className: string }>> = {
+  bot: { label: 'Bot trả lời', className: 'bg-primary/10 text-primary' },
+  agent: { label: 'Người trả lời', className: 'bg-success/10 text-success' },
+};
+
+const LAST_SENDER_PREFIX: Partial<Record<Message['senderType'], string>> = {
+  bot: 'Bot: ',
+  agent: 'Nhân viên: ',
 };
 
 function initials(name: string) {
@@ -124,8 +139,38 @@ function formatTime(value: string | null) {
   return value ? new Date(value).toLocaleString('vi-VN') : '—';
 }
 
+function CustomerAvatar({ name, url, size }: { name: string; url?: string | null; size?: 'sm' | 'default' | 'lg' }) {
+  return (
+    <Avatar size={size}>
+      {url && <AvatarImage src={url} alt={name} referrerPolicy="no-referrer" />}
+      <AvatarFallback className="bg-primary/10 text-xs font-semibold text-primary">{initials(name)}</AvatarFallback>
+    </Avatar>
+  );
+}
+
+/** Avatar beside a reply: robot for the bot, person for a human (admin or Page Inbox). */
+function ReplierAvatar({ senderType }: { senderType: 'bot' | 'agent' }) {
+  return (
+    <Avatar size="sm" className="mt-0.5">
+      <AvatarFallback className={senderType === 'bot' ? 'bg-primary/10 text-primary' : 'bg-success/10 text-success'}>
+        {senderType === 'bot' ? <Bot className="size-3.5" /> : <UserRound className="size-3.5" />}
+      </AvatarFallback>
+    </Avatar>
+  );
+}
+
+/**
+ * Folds the latest page (newest 50) into the thread on screen: same id → take the fresh copy (status may have
+ * changed), new id → append. Older messages loaded via "Tải tin cũ hơn" are kept.
+ */
+function mergeMessages(current: Message[], latest: Message[]): Message[] {
+  const fresh = new Map(latest.map((m) => [m.id, m]));
+  const known = new Set(current.map((m) => m.id));
+  return [...current.map((m) => fresh.get(m.id) ?? m), ...latest.filter((m) => !known.has(m.id))];
+}
+
 export function Conversations() {
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [options, setOptions] = useState<Options>({ channels: [], bots: [], members: [] });
   const [items, setItems] = useState<ConversationSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -136,6 +181,40 @@ export function Conversations() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'' | 'act' | 'send' | 'older'>('');
   const loadingRef = useRef(false);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+
+  // Agent replies go out through the outbox worker (~1s later), and customer/bot messages arrive any time,
+  // so refresh the open thread: fast while something is still queued, slower otherwise.
+  const selectedId = selected?.id;
+  const hasQueued = selected?.messages.some((m) => m.status === 'queued') ?? false;
+  useEffect(() => {
+    if (!selectedId) return;
+    let failures = 0;
+    const timer = setInterval(async () => {
+      if (document.hidden || busyRef.current) return;
+      try {
+        const fresh = await api<Detail>(`/conversations/${selectedId}`);
+        failures = 0;
+        const el = threadRef.current;
+        const nearBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        const prev = selectedRef.current;
+        // User switched threads or a send/load-older ran while this request was in flight: drop the stale result.
+        if (!prev || prev.id !== selectedId || busyRef.current) return;
+        const merged = mergeMessages(prev.messages, fresh.messages);
+        setSelected({ ...fresh, messages: merged });
+        if (merged.length > prev.messages.length && nearBottom) requestAnimationFrame(() => el?.scrollTo({ top: el.scrollHeight }));
+      } catch (e) {
+        failures += 1;
+        console.warn('Làm mới hội thoại thất bại', { conversationId: selectedId, attempt: failures, error: (e as Error).message });
+        if (failures === 3) toast.error(`Không làm mới được hội thoại: ${(e as Error).message}. Đang thử lại…`);
+      }
+    }, hasQueued ? 2000 : 8000);
+    return () => clearInterval(timer);
+  }, [selectedId, hasQueued]);
 
   const loadPage = async (cursor: string | undefined, active: Filters) => {
     if (loadingRef.current) return;
@@ -162,7 +241,7 @@ export function Conversations() {
 
   useEffect(() => {
     api<Options>('/conversations/options').then(setOptions).catch((e) => setError(e.message));
-    loadPage(undefined, EMPTY_FILTERS);
+    loadPage(undefined, filters);
   }, []);
 
   const applyFilters = (e: FormEvent) => {
@@ -222,6 +301,8 @@ export function Conversations() {
   const setFilter = (key: keyof Filters) => (e: { target: { value: string } }) =>
     setFilters({ ...filters, [key]: e.target.value });
 
+  const customerName = selected ? (selected.customer.displayName ?? selected.customer.externalUserId) : '';
+
   return (
     <div className="grid h-full md:h-screen md:grid-cols-[380px_1fr]">
       <section className={cn('min-h-0 flex-col border-r bg-card md:flex', selected ? 'hidden' : 'flex')}>
@@ -260,17 +341,22 @@ export function Conversations() {
               <NativeSelect size="sm" aria-label="Lọc theo chế độ" value={filters.mode} onChange={setFilter('mode')}>
                 <NativeSelectOption value="">Mọi chế độ</NativeSelectOption>
                 <NativeSelectOption value="bot">Bot</NativeSelectOption>
-                <NativeSelectOption value="human">Người thật</NativeSelectOption>
+                <NativeSelectOption value="human">Người trả lời</NativeSelectOption>
                 <NativeSelectOption value="off">Đã tắt</NativeSelectOption>
               </NativeSelect>
-              <NativeSelect size="sm" aria-label="Lọc theo người tiếp quản" value={filters.assignedUserId} onChange={setFilter('assignedUserId')}>
-                <NativeSelectOption value="">Mọi người tiếp quản</NativeSelectOption>
-                {options.members.map((m) => (
-                  <NativeSelectOption key={m.id} value={m.id}>
-                    {m.username}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
+              {/* Only useful when more than one account can take over a conversation. */}
+              {options.members.length > 1 && (
+                <NativeSelect size="sm" aria-label="Lọc theo người tiếp quản" value={filters.assignedUserId} onChange={setFilter('assignedUserId')}>
+                  <NativeSelectOption value="">Mọi người tiếp quản</NativeSelectOption>
+                  {options.members.map((m) => (
+                    <NativeSelectOption key={m.id} value={m.id}>
+                      {m.username}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
               <div className="grid gap-1">
                 <Label htmlFor="f-from" className="text-xs font-normal text-muted-foreground">
                   Từ ngày
@@ -308,9 +394,7 @@ export function Conversations() {
                 )}
                 onClick={() => open(item.id)}
               >
-                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                  {initials(name)}
-                </span>
+                <CustomerAvatar name={name} url={item.customerAvatarUrl} size="lg" />
                 <span className="min-w-0 flex-1 space-y-0.5">
                   <span className="flex items-baseline justify-between gap-2">
                     <span className="truncate text-sm font-medium">{name}</span>
@@ -327,7 +411,10 @@ export function Conversations() {
                     </span>
                   </span>
                   {item.lastMessage && (
-                    <span className="line-clamp-2 text-xs text-muted-foreground">{item.lastMessage}</span>
+                    <span className="line-clamp-2 text-xs text-muted-foreground">
+                      {item.lastSenderType && LAST_SENDER_PREFIX[item.lastSenderType]}
+                      {item.lastMessage}
+                    </span>
                   )}
                 </span>
               </button>
@@ -366,13 +453,9 @@ export function Conversations() {
                 >
                   <ArrowLeft />
                 </Button>
-                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                  {initials(selected.customer.displayName ?? selected.customer.externalUserId)}
-                </span>
+                <CustomerAvatar name={customerName} url={selected.customer.profile?.avatarUrl} size="lg" />
                 <div className="min-w-0">
-                  <h2 className="truncate font-semibold">
-                    {selected.customer.displayName ?? selected.customer.externalUserId}
-                  </h2>
+                  <h2 className="truncate font-semibold">{customerName}</h2>
                   <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                     <Badge variant="secondary" className={cn('px-1.5 py-0 text-[11px]', MODE_CLASS[selected.mode])}>
                       {MODE_LABEL[selected.mode] ?? selected.mode}
@@ -396,7 +479,7 @@ export function Conversations() {
               )}
             </header>
 
-            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-5 py-4">
+            <div ref={threadRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-5 py-4">
               <Button
                 variant="ghost"
                 size="sm"
@@ -410,11 +493,19 @@ export function Conversations() {
               {selected.messages.map((m) => {
                 const clickable = m.senderType === 'bot';
                 const failed = m.status === 'failed' || m.status === 'blocked_by_policy';
-                return (
+                if (m.senderType === 'system') {
+                  return (
+                    <div key={m.id} className="self-center rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+                      {m.content} · {formatTime(m.createdAt)}
+                    </div>
+                  );
+                }
+                const fromCustomer = m.senderType === 'customer';
+                const tag = REPLY_TAG[m.senderType];
+                const bubble = (
                   <div
-                    key={m.id}
                     className={cn(
-                      'max-w-[75%] rounded-2xl border px-3.5 py-2 text-sm shadow-xs',
+                      'min-w-0 rounded-2xl border px-3.5 py-2 text-sm shadow-xs',
                       BUBBLE[m.senderType],
                       clickable && 'cursor-pointer transition-colors hover:border-primary/50',
                       failed && 'border-destructive/60',
@@ -434,9 +525,13 @@ export function Conversations() {
                     }
                   >
                     <div className="mb-0.5 flex items-center justify-between gap-3 text-xs">
-                      <span className="flex items-center gap-1 font-medium">
-                        {m.senderType === 'bot' && <Bot className="size-3.5 text-primary" />}
-                        {m.senderName}
+                      <span className="flex min-w-0 items-center gap-1.5 font-medium">
+                        <span className="truncate">{fromCustomer ? customerName : m.senderName}</span>
+                        {tag && (
+                          <Badge variant="secondary" className={cn('px-1.5 py-0 text-[10px]', tag.className)}>
+                            {tag.label}
+                          </Badge>
+                        )}
                       </span>
                       <time className="text-[11px] text-muted-foreground">{formatTime(m.createdAt)}</time>
                     </div>
@@ -446,6 +541,19 @@ export function Conversations() {
                       {m.errorCode ? ` · Lý do: ${m.errorCode}` : ''}
                       {clickable ? ' · Bấm để xem chi tiết' : ''}
                     </div>
+                  </div>
+                );
+                return (
+                  <div
+                    key={m.id}
+                    className={cn('flex max-w-[80%] items-start gap-2', fromCustomer ? 'self-start' : 'flex-row-reverse self-end')}
+                  >
+                    {fromCustomer ? (
+                      <CustomerAvatar name={customerName} url={selected.customer.profile?.avatarUrl} size="sm" />
+                    ) : (
+                      <ReplierAvatar senderType={m.senderType === 'bot' ? 'bot' : 'agent'} />
+                    )}
+                    {bubble}
                   </div>
                 );
               })}

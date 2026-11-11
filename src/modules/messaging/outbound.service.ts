@@ -47,7 +47,7 @@ export class OutboundService {
     }
 
     // Bot must stay silent while a human owns the thread. The last answer and the handoff notice still go out.
-    const meta = message.metadata as { kind?: string; handoff?: boolean } | null;
+    const meta = message.metadata as { kind?: string; handoff?: boolean; quickReplies?: string[] } | null;
     if (message.senderType === 'bot' && conversation.mode !== 'bot' && meta?.kind !== 'handoff' && meta?.handoff !== true) {
       await this.fail(message.id, 'mode_human');
       return;
@@ -81,6 +81,7 @@ export class OutboundService {
     try {
       const { providerMessageId } = await adapter.send(adapterChannel, conversation.externalThreadId, {
         text: message.content,
+        quickReplies: meta?.quickReplies,
       });
       try {
         await this.db
@@ -96,6 +97,19 @@ export class OutboundService {
         .update(conversations)
         .set({ lastMessageAt: new Date(), updatedAt: new Date() })
         .where(eq(conversations.id, conversation.id));
+
+      // Sending clears the typing bubble; turn it back on while more of the reply is still coming.
+      if (message.senderType === 'bot' && adapter.showTyping && (meta?.kind === 'wait' || (await this.hasQueuedAfter(message)))) {
+        adapter.showTyping(adapterChannel, conversation.externalThreadId).catch((err) =>
+          this.logger.warn({
+            msg: 'Không bật lại được trạng thái "đang nhắn" giữa các tin, tin vẫn gửi bình thường',
+            channelId: channelRow.id,
+            conversationId: conversation.id,
+            messageId: message.id,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
     } catch (err) {
       if (err instanceof SendError) {
         if (err.markChannelError) {
@@ -109,6 +123,22 @@ export class OutboundService {
       }
       throw err;
     }
+  }
+
+  private async hasQueuedAfter(message: typeof messages.$inferSelect): Promise<boolean> {
+    const [later] = await this.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, message.conversationId),
+          eq(messages.status, 'queued'),
+          eq(messages.senderType, 'bot'),
+          sql`(${messages.createdAt}, ${messages.id}) > (${message.createdAt}, ${message.id})`,
+        ),
+      )
+      .limit(1);
+    return Boolean(later);
   }
 
   /** Called when the outbox stops retrying, so the message no longer blocks later ones. */

@@ -16,12 +16,24 @@ export function Login({ onLogin }: { onLogin: (user: User) => void }) {
   const [busy, setBusy] = useState(false);
   const [signup, setSignup] = useState(false);
 
+  const isApp = window.location.pathname.startsWith('/app');
+
   useEffect(() => {
-    if (!window.location.pathname.startsWith('/app')) return;
+    if (!isApp) return;
     api<SignupStatus>('/signup/status')
       .then((s) => setSignup(s.enabled))
-      .catch(() => setSignup(false));
-  }, []);
+      .catch((err: unknown) => {
+        // Login still works; only the sign-up link is hidden.
+        console.warn('Không đọc được /signup/status, ẩn link đăng ký dùng thử.', err);
+        setSignup(false);
+      });
+  }, [isApp]);
+
+  const description = !isApp
+    ? 'Dành cho quản trị hệ thống.'
+    : signup
+      ? 'Đăng nhập vào workspace của shop.'
+      : 'Đăng nhập vào workspace của shop. Chưa có tài khoản? Liên hệ quản trị viên.';
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -34,13 +46,13 @@ export function Login({ onLogin }: { onLogin: (user: User) => void }) {
       });
       onLogin(result.user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Đăng nhập lỗi');
+      setError(err instanceof Error ? err.message : 'Không đăng nhập được, thử lại sau.');
       setBusy(false);
     }
   };
 
   return (
-    <AuthShell title="Đăng nhập" description="Dùng tài khoản được cấp cho bạn.">
+    <AuthShell title={isApp ? 'Đăng nhập' : 'Đăng nhập quản trị'} description={description}>
       <form onSubmit={submit} className="grid gap-4">
         <Field label="Tên đăng nhập" htmlFor="username">
           <Input

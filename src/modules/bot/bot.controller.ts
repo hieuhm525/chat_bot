@@ -17,6 +17,7 @@ import {
 import { AuthUser, CurrentUser } from '../../common/current-user.decorator';
 import { Roles } from '../../common/roles.decorator';
 import { BotInput, BotService } from './bot.service';
+import { MAX_QUICK_REPLIES, QUICK_REPLY_TITLE_MAX } from '../channels/adapters/messenger.adapter';
 
 class CreateBotDto {
   @IsString() @MinLength(1) @MaxLength(100) name!: string;
@@ -27,6 +28,13 @@ class CreateBotDto {
   @IsOptional() @IsBoolean() llmEnabled?: boolean;
   @IsOptional() @IsString() @MaxLength(4000) systemPrompt?: string;
   @IsOptional() @IsInt() pauseAfterFallbacks?: number;
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_QUICK_REPLIES, { message: `Tối đa ${MAX_QUICK_REPLIES} nút trả lời nhanh (giới hạn của Messenger)` })
+  @IsString({ each: true })
+  @MaxLength(QUICK_REPLY_TITLE_MAX, { each: true, message: `Mỗi nút trả lời nhanh tối đa ${QUICK_REPLY_TITLE_MAX} ký tự (giới hạn của Messenger)` })
+  greetingQuickReplies?: string[];
+  @IsOptional() @IsString() @MaxLength(1000) waitMessage?: string;
 }
 
 class UpdateBotDto {
@@ -38,6 +46,13 @@ class UpdateBotDto {
   @IsOptional() @IsBoolean() llmEnabled?: boolean;
   @IsOptional() @IsString() @MaxLength(4000) systemPrompt?: string;
   @IsOptional() @IsInt() pauseAfterFallbacks?: number;
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_QUICK_REPLIES, { message: `Tối đa ${MAX_QUICK_REPLIES} nút trả lời nhanh (giới hạn của Messenger)` })
+  @IsString({ each: true })
+  @MaxLength(QUICK_REPLY_TITLE_MAX, { each: true, message: `Mỗi nút trả lời nhanh tối đa ${QUICK_REPLY_TITLE_MAX} ký tự (giới hạn của Messenger)` })
+  greetingQuickReplies?: string[];
+  @IsOptional() @IsString() @MaxLength(1000) waitMessage?: string;
 }
 
 class CreateRuleDto {
@@ -46,6 +61,12 @@ class CreateRuleDto {
   @IsOptional() @IsIn(['contains', 'exact']) matchMode?: string;
   @IsOptional() @IsInt() priority?: number;
   @IsString() answer!: string;
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_QUICK_REPLIES, { message: `Tối đa ${MAX_QUICK_REPLIES} nút trả lời nhanh (giới hạn của Messenger)` })
+  @IsString({ each: true })
+  @MaxLength(QUICK_REPLY_TITLE_MAX, { each: true, message: `Mỗi nút trả lời nhanh tối đa ${QUICK_REPLY_TITLE_MAX} ký tự (giới hạn của Messenger)` })
+  quickReplies?: string[];
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
@@ -62,12 +83,26 @@ class GenerateRulesDto {
   @IsString() @MinLength(1) @MaxLength(30000) text!: string;
 }
 
+class RuleIdsDto {
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(500) @IsUUID(undefined, { each: true }) ids!: string[];
+}
+
+class BulkToggleRulesDto extends RuleIdsDto {
+  @IsBoolean() enabled!: boolean;
+}
+
 class UpdateRuleDto {
   @IsOptional() @IsString() @MinLength(1) name?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) keywords?: string[];
   @IsOptional() @IsIn(['contains', 'exact']) matchMode?: string;
   @IsOptional() @IsInt() priority?: number;
   @IsOptional() @IsString() answer?: string;
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_QUICK_REPLIES, { message: `Tối đa ${MAX_QUICK_REPLIES} nút trả lời nhanh (giới hạn của Messenger)` })
+  @IsString({ each: true })
+  @MaxLength(QUICK_REPLY_TITLE_MAX, { each: true, message: `Mỗi nút trả lời nhanh tối đa ${QUICK_REPLY_TITLE_MAX} ký tự (giới hạn của Messenger)` })
+  quickReplies?: string[];
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
@@ -135,6 +170,24 @@ export class BotController {
     @Body() dto: BulkRulesDto,
   ) {
     return this.bot.createRules(user.workspaceId, botId, user.id, dto.items);
+  }
+
+  @Post(':botId/rules/bulk-update')
+  setRulesEnabled(
+    @CurrentUser() user: AuthUser,
+    @Param('botId', ParseUUIDPipe) botId: string,
+    @Body() dto: BulkToggleRulesDto,
+  ) {
+    return this.bot.setRulesEnabled(user.workspaceId, botId, dto.ids, dto.enabled);
+  }
+
+  @Post(':botId/rules/bulk-delete')
+  deleteRules(
+    @CurrentUser() user: AuthUser,
+    @Param('botId', ParseUUIDPipe) botId: string,
+    @Body() dto: RuleIdsDto,
+  ) {
+    return this.bot.deleteRules(user.workspaceId, botId, dto.ids);
   }
 
   @Patch(':botId/rules/:id')

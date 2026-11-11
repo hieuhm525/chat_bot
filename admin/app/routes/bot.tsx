@@ -1,12 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Plus, Settings2, Trash2 } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Loader2, Plus, Settings2, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { useDialogs } from '@/components/dialogs';
-import { Field, LoadError, Loading, Notices, Page, PageHeader, Section, TableCard } from '@/components/page';
+import { Field, LoadError, Loading, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -21,6 +21,8 @@ export interface Agent {
   llmEnabled: boolean;
   systemPrompt: string;
   pauseAfterFallbacks: number;
+  greetingQuickReplies: string[];
+  waitMessage: string;
   ruleCount: number;
   channelCount: number;
   createdAt: string;
@@ -33,7 +35,7 @@ interface BotList {
 
 export function Bots() {
   const [data, setData] = useState<BotList | null>(null);
-  const [name, setName] = useState('');
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const { confirm } = useDialogs();
@@ -43,27 +45,13 @@ export function Bots() {
     load();
   }, []);
 
-  const create = async (e: FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setNotice('');
-    try {
-      await api('/bots', { method: 'POST', body: JSON.stringify({ name }) });
-      setName('');
-      setNotice('Đã tạo AI agent.');
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi tạo AI agent');
-    }
-  };
-
   const toggle = async (bot: Agent) => {
     setError('');
     try {
       await api(`/bots/${bot.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !bot.enabled }) });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi cập nhật AI agent');
+      setError(err instanceof Error ? err.message : 'Không cập nhật được AI agent.');
     }
   };
 
@@ -82,7 +70,7 @@ export function Bots() {
       setNotice(result.ok ? 'Đã xoá AI agent.' : '');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi xoá AI agent');
+      setError(err instanceof Error ? err.message : 'Không xoá được AI agent.');
     }
   };
 
@@ -97,9 +85,19 @@ export function Bots() {
         title="AI agent"
         description="Mỗi AI agent có bộ rule, lời chào và persona riêng; gắn vào một hoặc nhiều kênh."
         actions={
-          <Badge variant="outline" className="h-7 px-3 text-sm">
-            {data.items.length} / {data.maxBots} theo gói thuê
-          </Badge>
+          <>
+            <Badge variant="outline" className="h-7 px-3 text-sm">
+              {data.items.length} / {data.maxBots} theo gói hiện tại
+            </Badge>
+            <Button
+              onClick={() => setCreating(true)}
+              disabled={full}
+              title={full ? 'Gói hiện tại đã đạt giới hạn số AI agent.' : undefined}
+            >
+              <Plus />
+              Thêm AI agent
+            </Button>
+          </>
         }
       />
       <Notices error={error} notice={notice} />
@@ -152,7 +150,13 @@ export function Bots() {
             {!data.items.length && (
               <TableRow>
                 <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                  Chưa có AI agent.
+                  <div className="space-y-3">
+                    <p>Chưa có AI agent. Tạo một agent rồi thêm rule và gắn vào kênh.</p>
+                    <Button size="sm" onClick={() => setCreating(true)} disabled={full}>
+                      <Plus />
+                      Thêm AI agent đầu tiên
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             )}
@@ -160,22 +164,69 @@ export function Bots() {
         </Table>
       </TableCard>
 
-      <Section title="Thêm AI agent">
-        <Card className="py-5">
-          <CardContent className="space-y-3">
-            <form className="grid items-end gap-4 sm:grid-cols-[1fr_auto]" onSubmit={create}>
-              <Field label="Tên" htmlFor="bot-name">
-                <Input id="bot-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={100} />
-              </Field>
-              <Button type="submit" disabled={full}>
-                <Plus />
-                Thêm AI agent
-              </Button>
-            </form>
-            {full && <p className="text-sm text-muted-foreground">Gói thuê đã đạt giới hạn số AI agent.</p>}
-          </CardContent>
-        </Card>
-      </Section>
+      <CreateBotDialog open={creating} onClose={() => setCreating(false)} />
     </Page>
+  );
+}
+
+/** Creating an agent leads straight to its detail page: the next step is always adding rules. */
+function CreateBotDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (open) {
+      setName('');
+      setError('');
+    }
+  }, [open]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSaving(true);
+    try {
+      const bot = await api<Agent>('/bots', { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
+      navigate(`/bots/${bot.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Không tạo được AI agent.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && !saving && onClose()}>
+      <DialogContent>
+        <form onSubmit={submit} className="grid gap-5">
+          <DialogHeader>
+            <DialogTitle>Thêm AI agent</DialogTitle>
+            <DialogDescription>Sau khi tạo, bạn sẽ được chuyển tới trang thêm rule cho agent này.</DialogDescription>
+          </DialogHeader>
+          <Notices error={error} />
+          <Field label="Tên" htmlFor="bot-name">
+            <Input
+              id="bot-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              maxLength={100}
+              autoFocus
+              placeholder="Ví dụ: Tư vấn bán hàng"
+            />
+          </Field>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
+              Huỷ
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? <Loader2 className="animate-spin" /> : <Plus />}
+              Tạo AI agent
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

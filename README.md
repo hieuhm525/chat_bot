@@ -85,14 +85,13 @@ Tất cả dưới `/api/v1`, trừ `/webhooks/*` và `/health`.
 | GET/POST/PATCH | `/tenants`, `/tenants/:id` (chỉ `admin`); POST `/tenants/:id/suspend`, `/resume`, `/reset-owner-password` |
 | ALL | `/customers/*` → 308 sang `/tenants/*` (alias tạm thời) |
 | GET/POST/PATCH/DELETE | `/llm-providers`; POST `/llm-providers/:id/test` (chỉ `admin`) |
-| GET/POST | `/members` (chỉ `owner`); PATCH `/members/:id/password`, DELETE `/members/:id` (chỉ `owner`) |
 | GET | `/conversations`, `/conversations/:id`, `/conversations/:id/messages?before=` |
 | POST | `/conversations/:id/takeover`, `/release`, `/messages` |
 | GET/POST/PATCH/DELETE | `/channels`, `/channels/:id/test` (chỉ `owner`) |
 | GET/POST | `/bots`; GET/PATCH/DELETE `/bots/:botId`; GET/POST/PATCH/DELETE `/bots/:botId/rules` (chỉ `owner`) |
 | GET | `/stats/summary` |
 
-Phân quyền (deny by default): `admin` chỉ gọi `/tenants/*` và `/llm-providers/*`; `owner` gọi toàn bộ API của tenant (`/bots/*`, `/channels/*`, `/members/*`, `/conversations/*`, `/stats/*`); `agent` chỉ gọi `/conversations/*` và `/stats/summary`. Endpoint mới phải khai báo `@Roles`, nếu không sẽ bị `RolesGuard` chặn.
+Phân quyền (deny by default): `admin` chỉ gọi `/tenants/*` và `/llm-providers/*`; `owner` gọi toàn bộ API của tenant (`/bots/*`, `/channels/*`, `/conversations/*`, `/stats/*`). Chưa có role nhân viên; `messages.sender_type = 'agent'` nghĩa là tin do người (chủ shop hoặc Page Inbox) gửi, không phải role. Endpoint mới phải khai báo `@Roles`, nếu không sẽ bị `RolesGuard` chặn.
 
 Mỗi tenant có nhiều AI agent. Kênh phải chọn `botId` và bot phải thuộc cùng tenant. Tạo bot/kênh vượt `maxBots`/`maxChannels` trả 403 (khóa dòng workspace trong cùng transaction nên request song song không vượt được). Kênh `disabled` không tính vào giới hạn và chỉ lưu tin, không trả lời. Xoá bot đang gắn kênh hoặc bot cuối cùng trả 409; bot đã có tin được soft delete. Xoá kênh đã có hội thoại sẽ chuyển `status='disabled'` và giữ lịch sử.
 

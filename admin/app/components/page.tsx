@@ -42,12 +42,26 @@ export function Notices({ error, notice }: { error?: string; notice?: string }) 
   );
 }
 
-export function Field(props: { label: ReactNode; hint?: ReactNode; htmlFor?: string; className?: string; children: ReactNode }) {
+export function Field(props: {
+  label: ReactNode;
+  hint?: ReactNode;
+  /** Shown under the field in place of the hint. */
+  error?: ReactNode;
+  htmlFor?: string;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
     <div className={cn('grid gap-2', props.className)}>
       <Label htmlFor={props.htmlFor}>{props.label}</Label>
       {props.children}
-      {props.hint && <p className="text-xs text-muted-foreground">{props.hint}</p>}
+      {props.error ? (
+        <p className="text-xs text-destructive" role="alert">
+          {props.error}
+        </p>
+      ) : (
+        props.hint && <p className="text-xs text-muted-foreground">{props.hint}</p>
+      )}
     </div>
   );
 }

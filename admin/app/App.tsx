@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
 import { Navigate, NavLink, Route, Routes } from 'react-router-dom';
-import { Bot, Building2, Cpu, LayoutDashboard, LogOut, MessagesSquare, Radio, Users } from 'lucide-react';
+import { Bot, Building2, Cpu, LayoutDashboard, LogOut, MessagesSquare, Radio } from 'lucide-react';
 import { Loading } from '@/components/page';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -16,7 +16,6 @@ const Channels = lazy(() => import('./routes/channels').then((m) => ({ default: 
 const Bots = lazy(() => import('./routes/bot').then((m) => ({ default: m.Bots })));
 const BotDetail = lazy(() => import('./routes/bot-detail').then((m) => ({ default: m.BotDetail })));
 const RuleImport = lazy(() => import('./routes/rule-import').then((m) => ({ default: m.RuleImport })));
-const Members = lazy(() => import('./routes/members').then((m) => ({ default: m.Members })));
 const Tenants = lazy(() => import('./routes/tenants').then((m) => ({ default: m.Tenants })));
 const Providers = lazy(() => import('./routes/providers').then((m) => ({ default: m.Providers })));
 
@@ -38,7 +37,7 @@ interface NavItem {
   end?: boolean;
 }
 
-const ROLE_LABEL: Record<string, string> = { admin: 'Quản trị', owner: 'Chủ shop', agent: 'Nhân viên' };
+const ROLE_LABEL: Record<string, string> = { admin: 'Quản trị', owner: 'Chủ shop' };
 
 const area: 'admin' | 'app' = window.location.pathname.startsWith('/app') ? 'app' : 'admin';
 
@@ -124,7 +123,6 @@ export function App() {
             ? [
                 { to: '/channels', label: 'Kênh', icon: Radio },
                 { to: '/bots', label: 'AI agent', icon: Bot },
-                { to: '/members', label: 'Thành viên', icon: Users },
               ]
             : []),
         ];
@@ -203,7 +201,6 @@ export function App() {
             {isOwner && <Route path="/bots" element={<Bots />} />}
             {isOwner && <Route path="/bots/:botId" element={<BotDetail />} />}
             {isOwner && <Route path="/bots/:botId/import" element={<RuleImport />} />}
-            {isOwner && <Route path="/members" element={<Members />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         )}

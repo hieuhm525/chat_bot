@@ -39,7 +39,7 @@ export function Register({ onLogin }: { onLogin: (user: User) => void }) {
       const result = await api<{ user: User }>('/signup', { method: 'POST', body: JSON.stringify(form) });
       onLogin(result.user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Đăng ký lỗi');
+      setError(err instanceof Error ? err.message : 'Không đăng ký được, thử lại sau.');
       setBusy(false);
     }
   };
@@ -68,7 +68,7 @@ export function Register({ onLogin }: { onLogin: (user: User) => void }) {
   return (
     <AuthShell title="Đăng ký dùng thử" description={`Tạo workspace cho shop của bạn, dùng thử ${status.trialDays} ngày.`}>
       <form onSubmit={submit} className="grid gap-4">
-        <Field label="Tên đăng nhập" htmlFor="username">
+        <Field label="Tên đăng nhập" htmlFor="username" hint="3–32 ký tự: chữ, số, dấu chấm, gạch dưới, gạch ngang.">
           <Input
             id="username"
             value={form.username}
@@ -80,7 +80,7 @@ export function Register({ onLogin }: { onLogin: (user: User) => void }) {
             title="3–32 ký tự: chữ, số, . _ -"
           />
         </Field>
-        <Field label="Mật khẩu" htmlFor="password">
+        <Field label="Mật khẩu" htmlFor="password" hint="Tối thiểu 6 ký tự.">
           <Input
             id="password"
             value={form.password}
@@ -107,7 +107,7 @@ export function Register({ onLogin }: { onLogin: (user: User) => void }) {
 
         <Button type="submit" className="w-full" disabled={busy}>
           {busy && <Loader2 className="animate-spin" />}
-          {busy ? 'Đang tạo…' : 'Tạo tài khoản'}
+          {busy ? 'Đang tạo…' : 'Tạo workspace'}
         </Button>
         <p className="text-center text-sm text-muted-foreground">
           Đã có tài khoản? <Link to="/login">Đăng nhập</Link>

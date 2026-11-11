@@ -37,7 +37,7 @@ export class AuthController {
     return { user: result.user, expiresAt: result.expiresAt };
   }
 
-  @Roles('admin', 'owner', 'agent')
+  @Roles('admin', 'owner')
   @Post('logout')
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     await this.auth.logout(req.cookies?.[this.auth.cookieName]);
@@ -45,7 +45,7 @@ export class AuthController {
     return { ok: true };
   }
 
-  @Roles('admin', 'owner', 'agent')
+  @Roles('admin', 'owner')
   @Get('me')
   me(@CurrentUser() user: AuthUser) {
     return user;

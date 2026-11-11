@@ -90,17 +90,24 @@ describe('bv-agent-msg e2e', () => {
   let worker: OutboxWorker;
   let agent: ReturnType<typeof request.agent>;
   let adminAgent: ReturnType<typeof request.agent>;
-  let staffAgent: ReturnType<typeof request.agent>;
   let workspaceId: string;
   let botId: string;
   let conversationId: string;
   let ownerUserId: string;
-  let staffUserId: string;
   const llmCalls: string[] = [];
   const llmBodies: string[] = [];
 
+  const graphCalls: Array<{ url: string; body: any }> = [];
+
+  /**
+   * Replies are scheduled a "typing time" ahead; skip that wait for jobs never tried yet.
+   * Retry backoff (attempts > 0) is left alone so retry tests still see it.
+   */
   const drain = async () => {
-    for (let i = 0; i < 3; i++) await worker.tick();
+    for (let i = 0; i < 3; i++) {
+      await db.execute(sql`update outbox set next_attempt_at = now() where status = 'pending' and attempts = 0`);
+      await worker.tick();
+    }
   };
 
   const conversationByThread = async (thread: string) => {
@@ -207,6 +214,28 @@ describe('bv-agent-msg e2e', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
+      if (url.includes('graph.facebook.com')) {
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        graphCalls.push({ url, body });
+        if (body?.sender_action) {
+          return new Response(JSON.stringify({ recipient_id: body.recipient.id }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.includes('?fields=first_name')) {
+          return new Response(JSON.stringify({ first_name: 'Khách', last_name: 'Test' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.includes('/messenger_profile')) {
+          return new Response(JSON.stringify({ result: 'success' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+      }
       if (url.includes('/subscribed_apps')) {
         return new Response(JSON.stringify({ success: true }), {
           status: 200,
@@ -233,14 +262,6 @@ describe('bv-agent-msg e2e', () => {
         botId,
         credentials: { accessToken: 'fake' },
       })
-      .expect(201);
-
-    const staff = await agent.post('/api/v1/members').send({ username: 'staff', password: 'password123' }).expect(201);
-    staffUserId = staff.body.id;
-    staffAgent = request.agent(app.getHttpServer());
-    await staffAgent
-      .post('/api/v1/auth/login')
-      .send({ username: 'staff', password: 'password123' })
       .expect(201);
   });
 
@@ -669,11 +690,11 @@ describe('bv-agent-msg e2e', () => {
   });
 
   it('enforces @Roles on every route', async () => {
-    type Role = 'admin' | 'owner' | 'agent';
+    type Role = 'admin' | 'owner';
     const roleMap: Record<string, 'public' | Role[]> = {
       '/api/v1/auth/login': 'public',
-      '/api/v1/auth/logout': ['admin', 'owner', 'agent'],
-      '/api/v1/auth/me': ['admin', 'owner', 'agent'],
+      '/api/v1/auth/logout': ['admin', 'owner'],
+      '/api/v1/auth/me': ['admin', 'owner'],
       '/api/v1/setup/status': 'public',
       '/api/v1/setup': 'public',
       '/api/v1/signup/status': 'public',
@@ -694,20 +715,19 @@ describe('bv-agent-msg e2e', () => {
       '/api/v1/bots/:botId/rules': ['owner'],
       '/api/v1/bots/:botId/rules/generate': ['owner'],
       '/api/v1/bots/:botId/rules/bulk': ['owner'],
+      '/api/v1/bots/:botId/rules/bulk-update': ['owner'],
+      '/api/v1/bots/:botId/rules/bulk-delete': ['owner'],
       '/api/v1/bots/:botId/rules/:id': ['owner'],
       '/api/v1/channels': ['owner'],
       '/api/v1/channels/:id': ['owner'],
       '/api/v1/channels/:id/test': ['owner'],
-      '/api/v1/members': ['owner'],
-      '/api/v1/members/:id': ['owner'],
-      '/api/v1/members/:id/password': ['owner'],
-      '/api/v1/conversations': ['owner', 'agent'],
-      '/api/v1/conversations/options': ['owner', 'agent'],
-      '/api/v1/conversations/:id': ['owner', 'agent'],
-      '/api/v1/conversations/:id/messages': ['owner', 'agent'],
-      '/api/v1/conversations/:id/takeover': ['owner', 'agent'],
-      '/api/v1/conversations/:id/release': ['owner', 'agent'],
-      '/api/v1/stats/summary': ['owner', 'agent'],
+      '/api/v1/conversations': ['owner'],
+      '/api/v1/conversations/options': ['owner'],
+      '/api/v1/conversations/:id': ['owner'],
+      '/api/v1/conversations/:id/messages': ['owner'],
+      '/api/v1/conversations/:id/takeover': ['owner'],
+      '/api/v1/conversations/:id/release': ['owner'],
+      '/api/v1/stats/summary': ['owner'],
       '/webhooks/:provider': 'public',
       '/health': 'public',
     };
@@ -737,7 +757,6 @@ describe('bv-agent-msg e2e', () => {
     const actors: Array<[Role, ReturnType<typeof request.agent>]> = [
       ['admin', adminAgent],
       ['owner', agent],
-      ['agent', staffAgent],
     ];
 
     for (const route of routes) {
@@ -760,43 +779,6 @@ describe('bv-agent-msg e2e', () => {
         }
       }
     }
-  });
-
-  it('lets owners manage members and disabling a member ends their session', async () => {
-    await staffAgent.get('/api/v1/members').expect(403);
-    await staffAgent.get('/api/v1/bots').expect(403);
-    await staffAgent.get('/api/v1/channels').expect(403);
-    await staffAgent.get('/api/v1/tenants').expect(403);
-    await staffAgent.get('/api/v1/conversations').expect(200);
-    await staffAgent.get('/api/v1/stats/summary').expect(200);
-
-    await staffAgent.post(`/api/v1/conversations/${conversationId}/takeover`).expect(201);
-    await staffAgent
-      .post(`/api/v1/conversations/${conversationId}/messages`)
-      .send({ content: 'Nhân viên trả lời khách' })
-      .expect(201);
-    await drain();
-    let [conversation] = await db.select().from(conversations).where(eq(conversations.id, conversationId));
-    expect(conversation).toMatchObject({ mode: 'human', assignedUserId: staffUserId });
-
-    // Nobody can disable themselves, and the last owner stays enabled.
-    await agent.delete(`/api/v1/members/${ownerUserId}`).expect(400);
-
-    await agent.delete(`/api/v1/members/${staffUserId}`).expect(200);
-    await staffAgent.get('/api/v1/conversations').expect(401);
-    await request(app.getHttpServer())
-      .post('/api/v1/auth/login')
-      .send({ username: 'staff', password: 'password123' })
-      .expect(403);
-
-    [conversation] = await db.select().from(conversations).where(eq(conversations.id, conversationId));
-    expect(conversation).toMatchObject({ mode: 'human', assignedUserId: null });
-    const sentByStaff = await db
-      .select()
-      .from(messages)
-      .where(eq(messages.senderUserId, staffUserId));
-    expect(sentByStaff).toHaveLength(1);
-    expect(sentByStaff[0]).toMatchObject({ senderType: 'agent', content: 'Nhân viên trả lời khách' });
   });
 
   it('lists tenants once and redirects the old /customers route', async () => {
@@ -893,6 +875,43 @@ describe('bv-agent-msg e2e', () => {
       .post('/api/v1/tenants')
       .send({ name: 'X', username: 'newshop', password: 'password123' })
       .expect(403);
+  });
+
+  it('toggles and deletes many rules at once, only within the bot', async () => {
+    const created = await agent
+      .post(`/api/v1/bots/${botId}/rules/bulk`)
+      .send({
+        items: [
+          { name: 'Hàng loạt 1', keywords: ['hang loat mot'], answer: '1' },
+          { name: 'Hàng loạt 2', keywords: ['hang loat hai'], answer: '2' },
+        ],
+      })
+      .expect(201);
+    expect(created.body.created).toBe(2);
+    const list = await agent.get(`/api/v1/bots/${botId}/rules`).expect(200);
+    const ids = list.body
+      .filter((r: { name: string }) => r.name.startsWith('Hàng loạt'))
+      .map((r: { id: string }) => r.id);
+    const missing = '00000000-0000-4000-8000-000000000000';
+
+    await agent
+      .post(`/api/v1/bots/${botId}/rules/bulk-update`)
+      .send({ ids: [...ids, missing], enabled: false })
+      .expect(201)
+      .expect({ updated: 2 });
+    const toggled = await agent.get(`/api/v1/bots/${botId}/rules`).expect(200);
+    for (const id of ids) expect(toggled.body.find((r: { id: string }) => r.id === id).enabled).toBe(false);
+
+    await agent.post(`/api/v1/bots/${botId}/rules/bulk-update`).send({ ids: ['khong-phai-uuid'], enabled: true }).expect(400);
+    await agent.post(`/api/v1/bots/${botId}/rules/bulk-delete`).send({ ids: [] }).expect(400);
+
+    await agent
+      .post(`/api/v1/bots/${botId}/rules/bulk-delete`)
+      .send({ ids: [...ids, missing] })
+      .expect(201)
+      .expect({ deleted: 2 });
+    const after = await agent.get(`/api/v1/bots/${botId}/rules`).expect(200);
+    expect(after.body.some((r: { id: string }) => ids.includes(r.id))).toBe(false);
   });
 
   it('imports many rules at once and rejects a bad row without partial writes', async () => {
@@ -1252,6 +1271,148 @@ describe('bv-agent-msg e2e', () => {
       .expect(400);
   });
 
+  it('paces a rule answer, attaches its quick replies and shows typing first', async () => {
+    await agent
+      .post(`/api/v1/bots/${botId}/rules`)
+      .send({ name: 'QR quá dài', keywords: ['abc xyz'], answer: 'x', quickReplies: ['a'.repeat(21)] })
+      .expect(400);
+    await agent
+      .post(`/api/v1/bots/${botId}/rules`)
+      .send({
+        name: 'Khuyến mãi',
+        keywords: ['khuyến mãi tháng'],
+        answer: 'Dạ tháng này giảm giá mười phần trăm ạ.',
+        quickReplies: [' Phí ship ', 'Gặp nhân viên', 'Phí ship'],
+      })
+      .expect(201);
+
+    graphCalls.length = 0;
+    await postWebhook(payload('khuyến mãi tháng này', 'mid-qr-1', 'psid-qr'));
+    const before = Date.now();
+    await worker.tick(); // processes the event only; replies are scheduled ahead
+
+    const conversation = await conversationByThread('psid-qr');
+    const queued = await db
+      .select({ nextAttemptAt: outbox.nextAttemptAt })
+      .from(outbox)
+      .innerJoin(messages, sql`${outbox.payload}->>'messageId' = ${messages.id}::text`)
+      .where(eq(messages.conversationId, conversation.id));
+    expect(queued.length).toBeGreaterThan(0);
+    for (const job of queued) expect(job.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(before + 700);
+
+    await drain();
+    const actions = graphCalls.filter((c) => c.body?.sender_action).map((c) => c.body.sender_action);
+    expect(actions.slice(0, 2)).toEqual(['mark_seen', 'typing_on']);
+    const sends = graphCalls.filter((c) => c.body?.message);
+    expect(sends.at(-1)?.body.message).toEqual({
+      text: 'Dạ tháng này giảm giá mười phần trăm ạ.',
+      quick_replies: [
+        { content_type: 'text', title: 'Phí ship', payload: 'Phí ship' },
+        { content_type: 'text', title: 'Gặp nhân viên', payload: 'Gặp nhân viên' },
+      ],
+    });
+    // The greeting before it carries no buttons: Messenger drops them as soon as the next message arrives.
+    expect(sends.at(-2)?.body.message.quick_replies).toBeUndefined();
+  });
+
+  it('splits a long answer into several messages sent in order', async () => {
+    const first = 'Phần một. ' + 'a'.repeat(290);
+    const second = 'Phần hai. ' + 'b'.repeat(290);
+    await agent
+      .post(`/api/v1/bots/${botId}/rules`)
+      .send({ name: 'Bảo hành', keywords: ['chính sách bảo hành'], answer: `${first}\n\n${second}` })
+      .expect(201);
+
+    graphCalls.length = 0;
+    await postWebhook(payload('chính sách bảo hành thế nào', 'mid-split-1', 'psid-split'));
+    await drain();
+
+    const conversation = await conversationByThread('psid-split');
+    const detail = await agent.get(`/api/v1/conversations/${conversation.id}`).expect(200);
+    const answers = detail.body.messages.filter((m: any) => m.metadata.kind === 'answer');
+    expect(answers.map((m: any) => m.content)).toEqual([first, second]);
+    expect(answers.map((m: any) => m.status)).toEqual(['sent', 'sent']);
+    expect(answers[0].metadata).toMatchObject({ source: 'rule', part: 1, parts: 2 });
+    expect(answers[1].metadata).toMatchObject({ source: 'rule', part: 2, parts: 2 });
+    const texts = graphCalls.filter((c) => c.body?.message).map((c) => c.body.message.text);
+    expect(texts.slice(-2)).toEqual([first, second]);
+    // Typing comes back on between the two parts.
+    const secondSend = graphCalls.findIndex((c) => c.body?.message?.text === second);
+    expect(graphCalls[secondSend - 1].body).toMatchObject({ sender_action: 'typing_on' });
+  });
+
+  it('answers Get Started with the greeting and its buttons without counting a fallback', async () => {
+    await agent
+      .patch(`/api/v1/bots/${botId}`)
+      .send({ greeting: 'Dạ em chào anh/chị ạ.', greetingQuickReplies: ['Giờ mở cửa', 'Khuyến mãi'] })
+      .expect(200);
+    await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'PAGE1',
+          time: Date.now(),
+          messaging: [
+            {
+              sender: { id: 'psid-start' },
+              recipient: { id: 'PAGE1' },
+              timestamp: Date.now(),
+              postback: { mid: 'mid-start-1', title: 'Bắt đầu', payload: 'GET_STARTED' },
+            },
+          ],
+        },
+      ],
+    });
+    await drain();
+
+    const conversation = await conversationByThread('psid-start');
+    const detail = await agent.get(`/api/v1/conversations/${conversation.id}`).expect(200);
+    expect(detail.body.messages.map((m: any) => [m.senderType, m.content])).toEqual([
+      ['customer', 'Bắt đầu'],
+      ['bot', 'Dạ em chào anh/chị ạ.'],
+    ]);
+    expect(detail.body.messages[1].metadata).toMatchObject({ kind: 'greeting', quickReplies: ['Giờ mở cửa', 'Khuyến mãi'] });
+    expect(detail.body.messages[1].status).toBe('sent');
+    expect(conversation.fallbackCount).toBe(0);
+
+    await agent.patch(`/api/v1/bots/${botId}`).send({ greetingQuickReplies: [] }).expect(200);
+  });
+
+  it('pushes Get Started and the menu to Meta and keeps them on later channel edits', async () => {
+    const list = await agent.get('/api/v1/channels').expect(200);
+    const page = list.body.items.find((c: any) => c.externalId === 'PAGE1');
+
+    const bad = await agent
+      .put(`/api/v1/channels/${page.id}/messenger-profile`)
+      .send({ getStarted: true, persistentMenu: [{ title: 'x'.repeat(31) }, { title: 'Web', url: 'http://insecure.example' }] })
+      .expect(400);
+    expect(JSON.stringify(bad.body)).toContain('30 ký tự');
+    expect(JSON.stringify(bad.body)).toContain('https');
+
+    graphCalls.length = 0;
+    const menu = [{ title: 'Giờ mở cửa' }, { title: 'Website', url: 'https://shop.example' }];
+    const saved = await agent
+      .put(`/api/v1/channels/${page.id}/messenger-profile`)
+      .send({ getStarted: false, persistentMenu: menu })
+      .expect(200);
+    expect(saved.body.config.messengerProfile).toEqual({ getStarted: false, persistentMenu: menu });
+    const call = graphCalls.find((c) => c.url.includes('/messenger_profile'));
+    expect(call?.body.get_started).toEqual({ payload: 'GET_STARTED' });
+    expect(call?.body.persistent_menu[0].call_to_actions).toHaveLength(2);
+
+    await agent.patch(`/api/v1/channels/${page.id}`).send({ config: {} }).expect(200);
+    const after = await agent.get('/api/v1/channels').expect(200);
+    expect(after.body.items.find((c: any) => c.id === page.id).config.messengerProfile).toEqual({
+      getStarted: false,
+      persistentMenu: menu,
+    });
+
+    await agent
+      .put(`/api/v1/channels/${page.id}/messenger-profile`)
+      .send({ getStarted: false, persistentMenu: [] })
+      .expect(200);
+  });
+
   it('disables setup once an admin exists', async () => {
     const status = await request(app.getHttpServer()).get('/api/v1/setup/status').expect(200);
     expect(status.body.needsSetup).toBe(false);
@@ -1331,7 +1492,7 @@ describe('bv-agent-msg e2e', () => {
         b: await makeConversation('b', {
           mode: 'human',
           botId: extraBot.id,
-          assignedUserId: staffUserId,
+          assignedUserId: ownerUserId,
           displayName: 'Khách B',
           last: '2026-01-11T10:00:00Z',
         }),
@@ -1410,7 +1571,7 @@ describe('bv-agent-msg e2e', () => {
           conversationId: ids.b,
           direction: 'out' as const,
           senderType: 'agent',
-          senderUserId: staffUserId,
+          senderUserId: ownerUserId,
           content: 'nhân viên trả lời',
           status: 'sent',
           createdAt: at('2026-01-11T09:00:03Z'),
@@ -1465,7 +1626,7 @@ describe('bv-agent-msg e2e', () => {
       expect(await listIds(`channelId=${channelId}&botId=${extraBotId}`)).toEqual(sorted(ids.b));
       expect(await listIds(`channelId=${channelId}&mode=human`)).toEqual(sorted(ids.b));
       expect(await listIds(`channelId=${channelId}&mode=off`)).toEqual(sorted(ids.c, ids.d));
-      expect(await listIds(`channelId=${channelId}&assignedUserId=${staffUserId}`)).toEqual(sorted(ids.b));
+      expect(await listIds(`channelId=${channelId}&assignedUserId=${ownerUserId}`)).toEqual(sorted(ids.b));
       expect(await listIds(`channelId=${channelId}&from=2026-01-11&to=2026-01-11`)).toEqual(sorted(ids.b));
       expect(await listIds(`channelId=${channelId}&from=2026-01-12`)).toEqual(sorted(ids.c, ids.d));
 
@@ -1493,7 +1654,7 @@ describe('bv-agent-msg e2e', () => {
       expect(rowB).toMatchObject({
         channelName: 'Kênh phụ',
         botName: 'Bot phụ',
-        assignedUserName: 'staff',
+        assignedUserName: 'owner',
         lastMessage: 'mã giảm giá XYZ123',
       });
 
@@ -1523,7 +1684,7 @@ describe('bv-agent-msg e2e', () => {
       expect(byContent).toMatchObject({
         'khách hỏi': 'Khách',
         'bot trả lời': 'Bot phụ',
-        'nhân viên trả lời': 'staff',
+        'nhân viên trả lời': 'owner',
         'hệ thống ghi nhận': 'Hệ thống',
         'page inbox trả lời': 'Page Inbox',
       });
@@ -1606,7 +1767,6 @@ describe('bv-agent-msg e2e', () => {
     const SECRET_KEY_PART = 'LEAK-ME';
 
     let workspaceB = '';
-    let userBId = '';
     let botBId = '';
     let ruleBId = '';
     let channelBId = '';
@@ -1620,7 +1780,6 @@ describe('bv-agent-msg e2e', () => {
       workspaceB = tenant.body.id;
 
       const [userB] = await db.select().from(users).where(eq(users.username, 'ownerb'));
-      userBId = userB.id;
       const [botB] = await db.select().from(bots).where(eq(bots.workspaceId, workspaceB));
       botBId = botB.id;
       await db.update(bots).set({ systemPrompt: SECRET_PROMPT }).where(eq(bots.id, botB.id));
@@ -1681,11 +1840,11 @@ describe('bv-agent-msg e2e', () => {
         '/api/v1/bots/:botId/rules': `/api/v1/bots/${botBId}/rules`,
         '/api/v1/bots/:botId/rules/generate': `/api/v1/bots/${botBId}/rules/generate`,
         '/api/v1/bots/:botId/rules/bulk': `/api/v1/bots/${botBId}/rules/bulk`,
+        '/api/v1/bots/:botId/rules/bulk-update': `/api/v1/bots/${botBId}/rules/bulk-update`,
+        '/api/v1/bots/:botId/rules/bulk-delete': `/api/v1/bots/${botBId}/rules/bulk-delete`,
         '/api/v1/bots/:botId/rules/:id': `/api/v1/bots/${botBId}/rules/${ruleBId}`,
         '/api/v1/channels/:id': `/api/v1/channels/${channelBId}`,
         '/api/v1/channels/:id/test': `/api/v1/channels/${channelBId}/test`,
-        '/api/v1/members/:id': `/api/v1/members/${userBId}`,
-        '/api/v1/members/:id/password': `/api/v1/members/${userBId}/password`,
         '/api/v1/conversations/:id': `/api/v1/conversations/${conversationBId}`,
         '/api/v1/conversations/:id/messages': `/api/v1/conversations/${conversationBId}/messages`,
         '/api/v1/conversations/:id/takeover': `/api/v1/conversations/${conversationBId}/takeover`,
@@ -1696,10 +1855,12 @@ describe('bv-agent-msg e2e', () => {
 
     const bodyFor = (path: string) => {
       if (path.endsWith('/messages')) return { content: 'xin chào' };
-      if (path.endsWith('/password')) return { password: 'password123' };
       if (path.endsWith('/rules')) return { name: 'Rule mới', keywords: ['a b'], answer: 'a' };
       if (path.endsWith('/rules/generate')) return { text: 'Giờ mở cửa: 8h-20h' };
       if (path.endsWith('/rules/bulk')) return { items: [{ name: 'Rule mới', keywords: ['a b'], answer: 'a' }] };
+      // A valid body, so the 404 proves the bot check and not the validation pipe.
+      if (path.endsWith('/rules/bulk-update')) return { ids: [ruleBId], enabled: false };
+      if (path.endsWith('/rules/bulk-delete')) return { ids: [ruleBId] };
       return {};
     };
 
@@ -1749,8 +1910,6 @@ describe('bv-agent-msg e2e', () => {
       expect(botsA.body.items.map((b: { id: string }) => b.id)).not.toContain(botBId);
       const channelsA = await agent.get('/api/v1/channels').expect(200);
       expect(channelsA.body.items.map((c: { id: string }) => c.id)).not.toContain(channelBId);
-      const membersA = await agent.get('/api/v1/members').expect(200);
-      expect(membersA.body.map((m: { id: string }) => m.id)).not.toContain(userBId);
       const conversationsA = await agent.get('/api/v1/conversations?limit=100').expect(200);
       expect(conversationsA.body.items.map((c: { id: string }) => c.id)).not.toContain(conversationBId);
       const rulesA = await agent.get(`/api/v1/bots/${botId}/rules`).expect(200);

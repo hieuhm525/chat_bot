@@ -37,7 +37,7 @@ export function Setup({ status, onDone }: { status: SetupStatus; onDone: (user: 
       });
       onDone(result.user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Tạo admin lỗi');
+      setError(err instanceof Error ? err.message : 'Không tạo được tài khoản quản trị, thử lại sau.');
       setBusy(false);
     }
   };
@@ -59,7 +59,7 @@ export function Setup({ status, onDone }: { status: SetupStatus; onDone: (user: 
   return (
     <AuthShell
       title="Tạo tài khoản quản trị"
-      description="Tài khoản đầu tiên có toàn quyền với workspace này."
+      description="Tài khoản quản trị hệ thống: tạo và quản lý các tenant, AI provider."
       footer="Trang này tự ẩn sau khi hệ thống có tài khoản đầu tiên."
     >
       <form onSubmit={submit} className="grid gap-4">
@@ -90,7 +90,7 @@ export function Setup({ status, onDone }: { status: SetupStatus; onDone: (user: 
           />
         </Field>
 
-        <Field label="Xác nhận mật khẩu" htmlFor="confirmPassword">
+        <Field label="Nhập lại mật khẩu" htmlFor="confirmPassword">
           <Input
             id="confirmPassword"
             value={confirmPassword}

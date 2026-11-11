@@ -1,11 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { KeyRound, Lock, LockOpen, Pencil } from 'lucide-react';
+import { KeyRound, Loader2, Lock, LockOpen, Pencil, Plus } from 'lucide-react';
 import { api } from '../api';
-import { scrollToId, useDialogs } from '@/components/dialogs';
+import { useDialogs } from '@/components/dialogs';
 import { Field, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
@@ -57,6 +57,9 @@ function toDateInput(value: string | null) {
 export function Tenants() {
   const [items, setItems] = useState<Tenant[]>([]);
   const [form, setForm] = useState(empty);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const { confirm, askPassword } = useDialogs();
@@ -68,8 +71,9 @@ export function Tenants() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setNotice('');
+    setSaving(true);
     const body: Record<string, unknown> = {
       name: form.name,
       plan: form.plan,
@@ -88,11 +92,20 @@ export function Tenants() {
         });
         setNotice('Đã tạo tenant. Chủ shop đăng nhập tại /app.');
       }
+      setOpen(false);
       setForm(empty);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi lưu tenant');
+      setFormError(err instanceof Error ? err.message : 'Không lưu được tenant.');
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const openForm = (value: typeof empty) => {
+    setForm(value);
+    setFormError('');
+    setOpen(true);
   };
 
   const setStatus = async (tenant: Tenant, action: 'suspend' | 'resume') => {
@@ -100,7 +113,7 @@ export function Tenants() {
       action === 'suspend' &&
       !(await confirm({
         title: `Khóa ${tenant.name}?`,
-        description: 'Chủ shop và nhân viên không đăng nhập được, bot ngừng trả lời. Tin nhắn đến vẫn được lưu.',
+        description: 'Chủ shop không đăng nhập được, bot ngừng trả lời. Tin nhắn đến vẫn được lưu.',
         confirmLabel: 'Khóa tenant',
         destructive: true,
       }))
@@ -113,7 +126,7 @@ export function Tenants() {
       setNotice(action === 'suspend' ? `Đã khóa ${tenant.name}.` : `Đã mở lại ${tenant.name}.`);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi đổi trạng thái');
+      setError(err instanceof Error ? err.message : 'Không khóa/mở lại được tenant.');
     }
   };
 
@@ -133,12 +146,12 @@ export function Tenants() {
       });
       setNotice('Đã đặt lại mật khẩu và đăng xuất các phiên cũ của chủ shop.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi đặt lại mật khẩu');
+      setError(err instanceof Error ? err.message : 'Không đặt lại được mật khẩu.');
     }
   };
 
-  const edit = (tenant: Tenant) => {
-    setForm({
+  const edit = (tenant: Tenant) =>
+    openForm({
       id: tenant.id,
       name: tenant.name,
       username: tenant.username ?? '',
@@ -148,14 +161,18 @@ export function Tenants() {
       maxChannels: tenant.maxChannels,
       expiresAt: toDateInput(tenant.expiresAt),
     });
-    scrollToId('tenant-form');
-  };
 
   return (
     <Page className="max-w-7xl">
       <PageHeader
         title="Tenant"
-        description="Mỗi tenant là một workspace riêng; chủ shop đăng nhập tại /app. Tenant bị khóa hoặc hết hạn không đăng nhập được và bot ngừng trả lời, tin nhắn đến vẫn được lưu."
+        description="Workspace của từng shop. Tenant bị khóa/hết hạn thì bot ngừng trả lời, tin nhắn đến vẫn được lưu."
+        actions={
+          <Button onClick={() => openForm(empty)}>
+            <Plus />
+            Thêm tenant
+          </Button>
+        }
       />
       <Notices error={error} notice={notice} />
 
@@ -175,7 +192,7 @@ export function Tenants() {
           </TableHeader>
           <TableBody>
             {items.map((t) => (
-              <TableRow key={t.id} data-state={form.id === t.id ? 'selected' : undefined}>
+              <TableRow key={t.id}>
                 <TableCell>
                   <div className="font-medium">{t.name}</div>
                   <div className="text-xs text-muted-foreground">{t.username ?? '—'}</div>
@@ -234,7 +251,13 @@ export function Tenants() {
             {!items.length && (
               <TableRow>
                 <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
-                  Chưa có tenant.
+                  <div className="space-y-3">
+                    <p>Chưa có tenant. Shop tự đăng ký tại /app/register hoặc tạo ở đây.</p>
+                    <Button size="sm" onClick={() => openForm(empty)}>
+                      <Plus />
+                      Thêm tenant đầu tiên
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             )}
@@ -242,12 +265,17 @@ export function Tenants() {
         </Table>
       </TableCard>
 
-      <form id="tenant-form" onSubmit={submit} className="scroll-mt-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>{form.id ? `Sửa tenant: ${form.name}` : 'Thêm tenant'}</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      <Dialog open={open} onOpenChange={(v) => !v && !saving && setOpen(false)}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
+          <form onSubmit={submit} className="grid gap-5">
+          <DialogHeader>
+            <DialogTitle>{form.id ? `Sửa tenant: ${form.name}` : 'Thêm tenant'}</DialogTitle>
+            <DialogDescription>
+              {form.id ? 'Đổi gói, giới hạn và ngày hết hạn của shop.' : 'Chủ shop đăng nhập tại /app bằng tài khoản này.'}
+            </DialogDescription>
+          </DialogHeader>
+          <Notices error={formError} />
+          <div className="grid gap-5 sm:grid-cols-2">
             <Field label="Tên shop" htmlFor="t-name">
               <Input
                 id="t-name"
@@ -319,17 +347,19 @@ export function Tenants() {
                 onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
               />
             </Field>
-            <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
-              <Button type="submit">{form.id ? 'Lưu tenant' : 'Tạo tenant'}</Button>
-              {form.id && (
-                <Button type="button" variant="ghost" onClick={() => setForm(empty)}>
-                  Huỷ
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </form>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={saving}>
+              Huỷ
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving && <Loader2 className="animate-spin" />}
+              {form.id ? 'Lưu tenant' : 'Tạo tenant'}
+            </Button>
+          </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </Page>
   );
 }

@@ -24,9 +24,9 @@ export function Dashboard() {
 
   const cards = [
     { label: 'Hội thoại', value: stats.conversations, icon: MessagesSquare },
-    { label: 'Đang người thật', value: stats.humanMode, icon: UserRound },
+    { label: 'Đang do người trả lời', value: stats.humanMode, icon: UserRound },
     { label: 'Tin khách hôm nay', value: stats.inboundToday, icon: ArrowDownLeft },
-    { label: 'Tin gửi hôm nay', value: stats.outboundToday, icon: ArrowUpRight },
+    { label: 'Tin đã trả lời hôm nay', value: stats.outboundToday, icon: ArrowUpRight },
   ];
   return (
     <Page>

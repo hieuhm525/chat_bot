@@ -11,7 +11,7 @@ import { Roles } from '../../common/roles.decorator';
 export class StatsController {
   constructor(private readonly conversations: ConversationsService) {}
 
-  @Roles('owner', 'agent')
+  @Roles('owner')
   @Get('summary')
   summary(@CurrentUser() user: AuthUser) {
     return this.conversations.stats(user.workspaceId);

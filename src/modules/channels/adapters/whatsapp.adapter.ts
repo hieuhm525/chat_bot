@@ -90,6 +90,35 @@ export class WhatsappAdapter implements ChannelAdapter {
     return { providerMessageId: body.messages?.[0]?.id ?? '' };
   }
 
+  /** Cloud API ties the typing indicator to the inbound message and marks it read at the same time. */
+  async showTyping(channel: AdapterChannel, to: string, inboundMessageId?: string): Promise<void> {
+    if (!inboundMessageId) return;
+    const version = (channel.config.graphVersion as string) ?? 'v26.0';
+    const res = await fetch(`https://graph.facebook.com/${version}/${channel.externalId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${channel.credentials.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: inboundMessageId,
+        typing_indicator: { type: 'text' },
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as any;
+      throw new SendError(
+        `Gửi typing indicator tới ${to} (số ${channel.externalId}, tin ${inboundMessageId}) thất bại: HTTP ${res.status}, ` +
+          `mã Graph ${body?.error?.code ?? '—'}: ${body?.error?.message ?? `Graph ${res.status}`}`,
+        res.status === 429 || res.status >= 500,
+        String(body?.error?.code ?? res.status),
+      );
+    }
+  }
+
   canSend(_channel: AdapterChannel, conv: ConversationWindow, at: Date) {
     if (!conv.lastInboundAt) return { ok: false as const, reason: 'chưa có tin khách' };
     if (at.getTime() - conv.lastInboundAt.getTime() > WINDOW_MS) {

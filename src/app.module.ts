@@ -13,7 +13,6 @@ import { BotModule } from './modules/bot/bot.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { SetupModule } from './modules/setup/setup.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
-import { MembersModule } from './modules/members/members.module';
 import { LlmProvidersModule } from './modules/llm-providers/llm-providers.module';
 
 @Module({
@@ -46,7 +45,6 @@ import { LlmProvidersModule } from './modules/llm-providers/llm-providers.module
     MessagingModule,
     SetupModule,
     TenantsModule,
-    MembersModule,
     LlmProvidersModule,
   ],
   providers: [

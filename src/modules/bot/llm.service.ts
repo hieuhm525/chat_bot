@@ -64,6 +64,8 @@ export class LlmService implements OnModuleInit {
   private readonly logger = new Logger(LlmService.name);
   private cache?: { at: number; providers: LlmProvider[] };
   private seeded = false;
+  /** Gemini models that answered 400 to `reasoning_effort: minimal` (Flash 3.7+); they get `low` instead. */
+  private readonly noMinimalThinking = new Set<string>();
 
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
@@ -180,6 +182,10 @@ export class LlmService implements OnModuleInit {
     opts: CallOptions = {},
   ): Promise<Omit<LlmResult, 'latencyMs'> & { rateLimit?: RateLimit }> {
     const maxTokens = opts.maxTokens ?? this.config.getOrThrow<number>('LLM_MAX_TOKENS');
+    // Gemini 3 cannot turn thinking off and thinks before every reply; for short chat answers
+    // that thinking is most of the latency, so ask for the least the model accepts.
+    const isGemini = /generativelanguage\.googleapis\.com/.test(provider.baseUrl);
+    const effort = isGemini ? (this.noMinimalThinking.has(provider.model) ? 'low' : 'minimal') : undefined;
     const res = await fetch(`${provider.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -191,12 +197,21 @@ export class LlmService implements OnModuleInit {
         messages,
         temperature: 0.3,
         max_tokens: maxTokens,
-        // Gemini 3 always thinks and the thoughts count against max_tokens; keep them short.
-        ...(/generativelanguage\.googleapis\.com/.test(provider.baseUrl) ? { reasoning_effort: 'low' } : {}),
+        ...(effort ? { reasoning_effort: effort } : {}),
       }),
       signal: AbortSignal.timeout(opts.timeoutMs ?? this.config.getOrThrow<number>('LLM_TIMEOUT_MS')),
     });
-    if (!res.ok) throw new Error(await httpError(res));
+    if (!res.ok) {
+      const message = await httpError(res);
+      if (effort === 'minimal' && res.status === 400 && /minimal|reasoning|thinking/i.test(message)) {
+        this.logger.warn(
+          `Model ${provider.model} (provider ${provider.name}) không nhận reasoning_effort=minimal (${message}); chuyển sang low`,
+        );
+        this.noMinimalThinking.add(provider.model);
+        return this.call(provider, messages, opts);
+      }
+      throw new Error(message);
+    }
     const body = (await res.json()) as any;
     const choice = body?.choices?.[0];
     const content = choice?.message?.content;

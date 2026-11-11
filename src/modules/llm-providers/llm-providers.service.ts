@@ -141,7 +141,7 @@ export class LlmProvidersService {
     }
   }
 
-  /** Tokens spent per provider name, from bot answers stored in `messages.metadata`. */
+  /** Tokens spent and answer latency per provider name, from bot answers stored in `messages.metadata`. */
   async usage() {
     const rows = await this.db
       .select({
@@ -150,6 +150,10 @@ export class LlmProvidersService {
         tokensIn: sql<number>`coalesce(sum((${messages.metadata}->>'tokensIn')::int), 0)::int`,
         tokensOut: sql<number>`coalesce(sum((${messages.metadata}->>'tokensOut')::int), 0)::int`,
         tokensToday: sql<number>`coalesce(sum((coalesce((${messages.metadata}->>'tokensIn')::int, 0) + coalesce((${messages.metadata}->>'tokensOut')::int, 0))) filter (where ${messages.createdAt} >= date_trunc('day', now())), 0)::int`,
+        // Real answer latency over the last 7 days, so admins compare providers on actual traffic.
+        latencyCount: sql<number>`(count(*) filter (where ${messages.createdAt} >= now() - interval '7 days' and ${messages.metadata} ? 'latencyMs'))::int`,
+        latencyP50: sql<number | null>`(percentile_cont(0.5) within group (order by (${messages.metadata}->>'latencyMs')::int) filter (where ${messages.createdAt} >= now() - interval '7 days'))::int`,
+        latencyP95: sql<number | null>`(percentile_cont(0.95) within group (order by (${messages.metadata}->>'latencyMs')::int) filter (where ${messages.createdAt} >= now() - interval '7 days'))::int`,
       })
       .from(messages)
       .where(sql`${messages.metadata}->>'source' = 'llm' and ${messages.metadata} ? 'provider'`)

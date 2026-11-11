@@ -1,11 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { ExternalLink, FlaskConical, Loader2, Pencil, PlugZap, ScanSearch, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { ExternalLink, FlaskConical, Loader2, Pencil, PlugZap, Plus, ScanSearch, Trash2 } from 'lucide-react';
 import { api } from '../api';
-import { scrollToId, useDialogs } from '@/components/dialogs';
+import { useDialogs } from '@/components/dialogs';
 import { Field, Notices, Page, PageHeader, TableCard } from '@/components/page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
@@ -34,6 +34,10 @@ interface Usage {
   tokensIn: number;
   tokensOut: number;
   tokensToday: number;
+  /** Real answers in the last 7 days that recorded a latency; p50/p95 are null when there are none. */
+  latencyCount: number;
+  latencyP50: number | null;
+  latencyP95: number | null;
 }
 
 interface TestResult {
@@ -89,7 +93,10 @@ const PRESETS: Preset[] = [
 /** Ids that are clearly not chat models (embeddings, image/video/audio generation, realtime). */
 const NON_CHAT = /embed|imagen|veo|tts|aqa|audio|live|whisper|dall-e|moderation|image|robotics|lyria|transcribe/i;
 
-type Probe = { ok: boolean; detail: string } | 'pending';
+type Probe = { ok: boolean; detail: string; latencyMs?: number } | 'pending';
+
+/** Rough speed bands for a chat reply, so admins read a label instead of comparing raw ms. */
+const speedLabel = (ms: number) => (ms < 1500 ? 'nhanh' : ms < 3500 ? 'trung bình' : 'chậm');
 
 const presetFor = (baseUrl: string) => PRESETS.find((p) => p.baseUrl === baseUrl.replace(/\/$/, ''))?.id ?? 'custom';
 
@@ -116,6 +123,9 @@ export function Providers() {
   const [showFailed, setShowFailed] = useState(false);
   const [busy, setBusy] = useState<'' | 'scan' | 'test' | 'probe'>('');
   const [check, setCheck] = useState<TestResponse | null>(null);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const { confirm } = useDialogs();
@@ -143,6 +153,12 @@ export function Providers() {
     setPreset('custom');
     clearModels();
     setCheck(null);
+    setFormError('');
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setOpen(true);
   };
 
   const choosePreset = (id: string) => {
@@ -166,31 +182,36 @@ export function Providers() {
     ...(form.apiKey ? { apiKey: form.apiKey } : {}),
   });
 
+  /** Lists the provider's chat models, then calls each one to keep only working models, fastest first. */
   const scan = async () => {
-    setError('');
+    setFormError('');
     setBusy('scan');
+    let chat: string[];
     try {
       const res = await api<{ models: string[] }>('/llm-providers/models', {
         method: 'POST',
         body: JSON.stringify(draft()),
       });
-      const chat = res.models.filter((m) => !NON_CHAT.test(m));
+      chat = res.models.filter((m) => !NON_CHAT.test(m));
       setProbes({});
       setModels(chat);
       setHidden(res.models.length - chat.length);
-      if (!chat.length) setError('Provider không trả về model chat nào.');
-      else if (!chat.includes(form.model)) setForm((f) => ({ ...f, model: chat[0] }));
     } catch (err) {
       clearModels();
-      setError(`Quét model lỗi: ${err instanceof Error ? err.message : err}`);
-    } finally {
+      setFormError(`Quét model lỗi: ${err instanceof Error ? err.message : err}`);
       setBusy('');
+      return;
     }
+    if (!chat.length) {
+      setFormError('Provider không trả về model chat nào.');
+      setBusy('');
+      return;
+    }
+    await probeAll(chat);
   };
 
-  /** Calls each scanned model once (3 at a time) so the list only offers models this key can use. */
-  const probeAll = async () => {
-    setError('');
+  /** Calls each model once (3 at a time) so the list only offers models this key can use. */
+  const probeAll = async (models: string[]) => {
     setBusy('probe');
     setShowFailed(false);
     const queue = [...models];
@@ -203,7 +224,7 @@ export function Providers() {
             method: 'POST',
             body: JSON.stringify({ ...draft(), model }),
           });
-          results[model] = { ok: res.ok, detail: res.detail };
+          results[model] = { ok: res.ok, detail: res.detail, latencyMs: res.result?.latencyMs };
         } catch (err) {
           results[model] = { ok: false, detail: err instanceof Error ? err.message : String(err) };
         }
@@ -211,20 +232,27 @@ export function Providers() {
       }
     };
     await Promise.all([worker(), worker(), worker()]);
-    const working = models.filter((m) => (results[m] as { ok: boolean }).ok);
-    if (!working.length) setError('Không model nào trả lời được. Kiểm tra lại key hoặc hạn mức.');
+    // Fastest working models first, so the default pick is the quickest one.
+    const latency = (m: string) => {
+      const r = results[m];
+      return r !== 'pending' && r.ok ? (r.latencyMs ?? Infinity) : Infinity;
+    };
+    const sorted = [...models].sort((a, b) => latency(a) - latency(b));
+    setModels(sorted);
+    const working = sorted.filter((m) => (results[m] as { ok: boolean }).ok);
+    if (!working.length) setFormError('Không model nào trả lời được. Kiểm tra lại key hoặc hạn mức.');
     else if (!working.includes(form.model)) setForm((f) => ({ ...f, model: working[0] }));
     setBusy('');
   };
 
   const testDraft = async () => {
-    setError('');
+    setFormError('');
     setBusy('test');
     setCheck(null);
     try {
       setCheck(await api<TestResponse>('/llm-providers/test', { method: 'POST', body: JSON.stringify(draft()) }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi kiểm tra');
+      setFormError(err instanceof Error ? err.message : 'Không kiểm tra được model.');
     } finally {
       setBusy('');
     }
@@ -232,8 +260,9 @@ export function Providers() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setNotice('');
+    setSaving(true);
     const body: Record<string, unknown> = {
       name: form.name,
       baseUrl: form.baseUrl,
@@ -245,11 +274,14 @@ export function Providers() {
     try {
       if (form.id) await api(`/llm-providers/${form.id}`, { method: 'PATCH', body: JSON.stringify(body) });
       else await api('/llm-providers', { method: 'POST', body: JSON.stringify(body) });
+      setOpen(false);
       resetForm();
       setNotice(form.id ? 'Đã lưu provider.' : 'Đã thêm provider.');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi lưu provider');
+      setFormError(err instanceof Error ? err.message : 'Không lưu được provider.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -266,7 +298,8 @@ export function Providers() {
     setPreset(presetFor(provider.baseUrl));
     clearModels();
     setCheck(null);
-    scrollToId('provider-form');
+    setFormError('');
+    setOpen(true);
   };
 
   const toggle = async (provider: Provider) => {
@@ -278,7 +311,7 @@ export function Providers() {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi cập nhật provider');
+      setError(err instanceof Error ? err.message : 'Không cập nhật được provider.');
     }
   };
 
@@ -294,7 +327,7 @@ export function Providers() {
       );
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi kiểm tra provider');
+      setError(err instanceof Error ? err.message : 'Không kiểm tra được provider.');
     }
   };
 
@@ -306,7 +339,7 @@ export function Providers() {
       await api(`/llm-providers/${provider.id}`, { method: 'DELETE' });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lỗi xoá provider');
+      setError(err instanceof Error ? err.message : 'Không xoá được provider.');
     }
   };
 
@@ -319,11 +352,22 @@ export function Providers() {
     return p && p !== 'pending' && p.ok;
   };
   const visible = probed && busy !== 'probe' && !showFailed ? models.filter(isOk) : models;
+  // Fastest working model from the last scan; models are already sorted, so it is the first ok one with a latency.
+  const fastest =
+    busy === 'probe'
+      ? undefined
+      : models.find((m) => {
+          const p = probes[m];
+          return p && p !== 'pending' && p.ok && p.latencyMs != null;
+        });
+  const fastestMs = fastest ? (probes[fastest] as { latencyMs: number }).latencyMs : 0;
   const mark = (m: string) => {
     const p = probes[m];
     if (!p) return m;
     if (p === 'pending') return `… ${m}`;
-    return `${p.ok ? '✓' : '✗'} ${m}`;
+    if (!p.ok) return `✗ ${m}`;
+    if (p.latencyMs == null) return `✓ ${m}`;
+    return `✓ ${m} — ${fmt(p.latencyMs)} ms (${speedLabel(p.latencyMs)})${m === fastest ? ' ★ nên chọn' : ''}`;
   };
   const usageOf = (name: string) => usage.find((u) => u.provider === name);
 
@@ -331,7 +375,13 @@ export function Providers() {
     <Page className="max-w-7xl">
       <PageHeader
         title="AI provider"
-        description="Thứ tự thử từ trên xuống (ưu tiên cao trước). Provider lỗi sẽ chuyển sang provider kế tiếp. Key được mã hoá, không bao giờ hiển thị lại."
+        description="Thử theo ưu tiên từ cao xuống; provider lỗi thì chuyển sang provider kế tiếp."
+        actions={
+          <Button onClick={openCreate}>
+            <Plus />
+            Thêm provider
+          </Button>
+        }
       />
       <Notices error={error} notice={notice} />
 
@@ -344,6 +394,9 @@ export function Providers() {
               <TableHead>Model</TableHead>
               <TableHead>Key</TableHead>
               <TableHead title="Tổng token bot đã dùng với provider này (vào + ra)">Đã dùng</TableHead>
+              <TableHead title="Thời gian chờ provider trả lời khách thật, 7 ngày gần nhất. Trung vị = một nửa số câu nhanh hơn mức này; p95 = 95% số câu nhanh hơn mức này.">
+                Độ trễ (7 ngày)
+              </TableHead>
               <TableHead>Bật</TableHead>
               <TableHead>Kiểm tra</TableHead>
               <TableHead />
@@ -353,7 +406,7 @@ export function Providers() {
             {items.map((p) => {
               const u = usageOf(p.name);
               return (
-                <TableRow key={p.id} data-state={form.id === p.id ? 'selected' : undefined}>
+                <TableRow key={p.id}>
                   <TableCell className="tabular-nums">{p.priority}</TableCell>
                   <TableCell>
                     <div className="font-medium">{p.name}</div>
@@ -371,6 +424,21 @@ export function Providers() {
                       </>
                     ) : (
                       <span className="text-muted-foreground">0</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {u?.latencyP50 != null ? (
+                      <>
+                        <div className="tabular-nums">
+                          {fmt(u.latencyP50)} ms{' '}
+                          <span className="text-xs text-muted-foreground">({speedLabel(u.latencyP50)})</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          p95 {fmt(u.latencyP95)} ms · {fmt(u.latencyCount)} câu
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">chưa có</span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -420,8 +488,14 @@ export function Providers() {
             })}
             {!items.length && (
               <TableRow>
-                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
-                  Chưa có provider. Thêm key Gemini / OpenRouter / Groq để bật trả lời bằng AI.
+                <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
+                  <div className="space-y-3">
+                    <p>Chưa có provider. Thêm key Gemini / OpenRouter / Groq để bật trả lời bằng AI.</p>
+                    <Button size="sm" onClick={openCreate}>
+                      <Plus />
+                      Thêm provider đầu tiên
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             )}
@@ -429,12 +503,15 @@ export function Providers() {
         </Table>
       </TableCard>
 
-      <form id="provider-form" onSubmit={submit} className="scroll-mt-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>{form.id ? `Sửa provider: ${form.name}` : 'Thêm provider'}</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-5 md:grid-cols-2">
+      <Dialog open={open} onOpenChange={(v) => !v && !saving && busy === '' && setOpen(false)}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl">
+          <form onSubmit={submit} className="grid gap-5">
+          <DialogHeader>
+            <DialogTitle>{form.id ? `Sửa provider: ${form.name}` : 'Thêm provider'}</DialogTitle>
+            <DialogDescription>Key được mã hoá và không bao giờ hiển thị lại.</DialogDescription>
+          </DialogHeader>
+          <Notices error={formError} />
+          <div className="grid gap-5 md:grid-cols-2">
             <Field label="Nhà cung cấp" htmlFor="p-preset">
               <NativeSelect id="p-preset" value={preset} onChange={(e) => choosePreset(e.target.value)}>
                 {PRESETS.map((p) => (
@@ -532,21 +609,34 @@ export function Providers() {
                       value={form.model}
                       onChange={(e) => setForm({ ...form, model: e.target.value })}
                       required
-                      placeholder="Bấm “Quét model” hoặc gõ tên"
+                      placeholder="Bấm “Quét model” (gọi thử từng model, ~10 token/model) hoặc gõ tên"
                     />
                   )}
                 </div>
                 <Button type="button" variant="outline" onClick={scan} disabled={!form.baseUrl || busy !== ''}>
-                  {busy === 'scan' ? <Loader2 className="animate-spin" /> : <ScanSearch />}
-                  {busy === 'scan' ? 'Đang quét…' : 'Quét model'}
+                  {busy === 'scan' || busy === 'probe' ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+                  {busy === 'scan'
+                    ? 'Đang quét…'
+                    : busy === 'probe'
+                      ? `Đang thử ${done.length}/${models.length}…`
+                      : 'Quét model'}
                 </Button>
-                {models.length > 0 && (
-                  <Button type="button" variant="outline" onClick={probeAll} disabled={busy !== ''}>
-                    {busy === 'probe' ? <Loader2 className="animate-spin" /> : <SlidersHorizontal />}
-                    {busy === 'probe' ? `Đang thử ${done.length}/${models.length}…` : 'Lọc model dùng được'}
-                  </Button>
-                )}
               </div>
+              {fastest && (
+                <p className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant="secondary" className="bg-success/10 text-success">
+                    Gợi ý
+                  </Badge>
+                  <span>
+                    Nên chọn <span className="font-mono text-xs">{fastest}</span>: nhanh nhất ({fmt(fastestMs)} ms).
+                  </span>
+                  {form.model !== fastest && (
+                    <Button type="button" variant="link" className="h-auto p-0" onClick={() => setForm({ ...form, model: fastest })}>
+                      Dùng model này
+                    </Button>
+                  )}
+                </p>
+              )}
               {models.length > 0 && (
                 <p className="text-xs text-muted-foreground">
                   {models.length} model chat{hidden ? ` (đã ẩn ${hidden} model embedding/ảnh/âm thanh)` : ''}.
@@ -563,7 +653,7 @@ export function Providers() {
                       </button>
                     </>
                   )}
-                  {!probed && ' Bấm “Lọc model dùng được” để gọi thử từng model (mỗi model tốn ~10 token).'}
+                  {probed && busy !== 'probe' && okCount > 0 && ' Đã xếp model nhanh nhất lên đầu (đo bằng 1 câu hỏi ngắn, câu trả lời thật sẽ lâu hơn).'}
                 </p>
               )}
             </div>
@@ -583,32 +673,34 @@ export function Providers() {
               </Label>
             </div>
 
-            <div className="flex flex-wrap gap-2 md:col-span-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={testDraft}
-                disabled={!form.baseUrl || !form.model || busy !== ''}
-              >
-                {busy === 'test' ? <Loader2 className="animate-spin" /> : <FlaskConical />}
-                {busy === 'test' ? 'Đang kiểm tra…' : 'Test kết nối'}
-              </Button>
-              <Button type="submit">{form.id ? 'Lưu provider' : 'Thêm provider'}</Button>
-              {form.id && (
-                <Button type="button" variant="ghost" onClick={resetForm}>
-                  Huỷ
-                </Button>
-              )}
-            </div>
-
             {check && (
               <div className="md:col-span-2">
                 <CheckResult check={check} quotaUrl={current?.quotaUrl} />
               </div>
             )}
-          </CardContent>
-        </Card>
-      </form>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="sm:mr-auto"
+              onClick={testDraft}
+              disabled={!form.baseUrl || !form.model || busy !== ''}
+            >
+              {busy === 'test' ? <Loader2 className="animate-spin" /> : <FlaskConical />}
+              {busy === 'test' ? 'Đang kiểm tra…' : 'Test kết nối'}
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={saving || busy !== ''}>
+              Huỷ
+            </Button>
+            <Button type="submit" disabled={saving || busy !== ''}>
+              {saving && <Loader2 className="animate-spin" />}
+              {form.id ? 'Lưu provider' : 'Thêm provider'}
+            </Button>
+          </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </Page>
   );
 }

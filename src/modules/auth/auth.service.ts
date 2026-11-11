@@ -85,7 +85,7 @@ export class AuthService {
       id: user.id,
       workspaceId: user.workspaceId,
       username: user.username,
-      role: user.role as 'admin' | 'owner' | 'agent',
+      role: user.role as 'admin' | 'owner',
     };
   }
 }

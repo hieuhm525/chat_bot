@@ -6,9 +6,26 @@ import {
   Param,
   Patch,
   Post,
+  Put,
 } from '@nestjs/common';
+import { Type } from 'class-transformer';
 import { PartialType } from '@nestjs/swagger';
-import { IsDateString, IsIn, IsObject, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsDateString,
+  IsIn,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUrl,
+  IsUUID,
+  MaxLength,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
+import { MAX_MENU_ITEMS, MENU_TITLE_MAX } from './adapters/messenger.adapter';
 import { CurrentUser, AuthUser } from '../../common/current-user.decorator';
 import { Roles } from '../../common/roles.decorator';
 import { ChannelsService } from './channels.service';
@@ -47,6 +64,28 @@ class CreateChannelDto {
 
 class UpdateChannelDto extends PartialType(CreateChannelDto) {}
 
+class MenuItemDto {
+  @IsString()
+  @MinLength(1, { message: 'Tên mục menu không được để trống' })
+  @MaxLength(MENU_TITLE_MAX, { message: `Tên mục menu tối đa ${MENU_TITLE_MAX} ký tự (giới hạn của Messenger)` })
+  title!: string;
+
+  @IsOptional()
+  @IsUrl({ protocols: ['https'], require_protocol: true }, { message: 'Link phải là URL https://...' })
+  url?: string;
+}
+
+class MessengerProfileDto {
+  @IsBoolean()
+  getStarted!: boolean;
+
+  @IsArray()
+  @ArrayMaxSize(MAX_MENU_ITEMS, { message: `Menu tối đa ${MAX_MENU_ITEMS} mục (giới hạn của Messenger)` })
+  @ValidateNested({ each: true })
+  @Type(() => MenuItemDto)
+  persistentMenu!: MenuItemDto[];
+}
+
 @Roles('owner')
 @Controller('channels')
 export class ChannelsController {
@@ -70,6 +109,17 @@ export class ChannelsController {
   @Delete(':id')
   remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.channels.remove(user.workspaceId, id);
+  }
+
+  @Put(':id/messenger-profile')
+  updateMessengerProfile(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: MessengerProfileDto) {
+    return this.channels.updateMessengerProfile(user.workspaceId, id, {
+      getStarted: dto.getStarted,
+      persistentMenu: dto.persistentMenu.map((item) => ({
+        title: item.title.trim(),
+        ...(item.url ? { url: item.url } : {}),
+      })),
+    });
   }
 
   @Post(':id/test')

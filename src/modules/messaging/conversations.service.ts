@@ -119,6 +119,7 @@ export class ConversationsService {
         customerId: customers.id,
         customerName: customers.displayName,
         externalUserId: customers.externalUserId,
+        customerAvatarUrl: sql<string | null>`${customers.profile}->>'avatarUrl'`,
         channelId: channels.id,
         channelName: channels.name,
         provider: channels.provider,
@@ -131,6 +132,9 @@ export class ConversationsService {
         lastMessage: sql<
           string | null
         >`(select left(m.content, ${EXCERPT_LENGTH}) from messages m where m.conversation_id = ${conversations.id} order by m.created_at desc, m.id desc limit 1)`,
+        lastSenderType: sql<
+          string | null
+        >`(select m.sender_type from messages m where m.conversation_id = ${conversations.id} order by m.created_at desc, m.id desc limit 1)`,
       })
       .from(conversations)
       .innerJoin(customers, eq(customers.id, conversations.customerId))
@@ -345,7 +349,7 @@ export class ConversationsService {
         when ${messages.senderType} = 'system' then 'Hệ thống'
         when ${messages.metadata}->>'via' = 'page_inbox' then 'Page Inbox'
         when ${messages.senderType} = 'bot' then coalesce((select b.name from bots b where b.id = ${messages.botId}), 'AI agent')
-        when ${messages.senderType} = 'agent' then coalesce((select u.username from users u where u.id = ${messages.senderUserId}), 'Nhân viên')
+        when ${messages.senderType} = 'agent' then coalesce((select u.username from users u where u.id = ${messages.senderUserId}), 'Shop')
         else ${messages.senderType}
       end`,
     };
@@ -353,7 +357,7 @@ export class ConversationsService {
 
   private async username(tx: Db, userId: string) {
     const [user] = await tx.select({ username: users.username }).from(users).where(eq(users.id, userId)).limit(1);
-    return user?.username ?? 'Nhân viên';
+    return user?.username ?? 'Shop';
   }
 
   private async workspaceTimezone(workspaceId: string) {

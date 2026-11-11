@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, Db } from '../../db/db.module';
 import { botRules, bots, channels, messages, workspaces } from '../../db/schema';
 import { containsWords, normalizeText } from '../../common/normalize-text';
@@ -9,6 +9,7 @@ export interface ResolveResult {
   text: string;
   source: 'rule' | 'llm' | 'fallback';
   ruleId?: string;
+  quickReplies?: string[];
   model?: string;
   provider?: string;
   tokensIn?: number;
@@ -23,6 +24,7 @@ export interface RuleCandidate {
   matchMode: string;
   priority: number;
   answer: string;
+  quickReplies?: string[];
   enabled: boolean;
 }
 
@@ -38,6 +40,7 @@ export interface RuleInput {
   name: string;
   keywords: string[];
   answer: string;
+  quickReplies?: string[];
   matchMode?: string;
   priority?: number;
   enabled?: boolean;
@@ -116,6 +119,13 @@ export interface BotInput {
   llmEnabled?: boolean;
   systemPrompt?: string;
   pauseAfterFallbacks?: number;
+  greetingQuickReplies?: string[];
+  waitMessage?: string;
+}
+
+/** Trimmed, non-empty, no duplicates; order is kept because it is the button order. */
+export function cleanQuickReplies(items: string[]): string[] {
+  return [...new Set(items.map((q) => q.trim()).filter(Boolean))];
 }
 
 /** Returns matched keyword count, or 0 when the rule must not answer. */
@@ -162,6 +172,8 @@ export class BotService {
         llmEnabled: bots.llmEnabled,
         systemPrompt: bots.systemPrompt,
         pauseAfterFallbacks: bots.pauseAfterFallbacks,
+        greetingQuickReplies: bots.greetingQuickReplies,
+        waitMessage: bots.waitMessage,
         createdAt: bots.createdAt,
         updatedAt: bots.updatedAt,
         ruleCount: sql<number>`(select count(*)::int from bot_rules br where br.bot_id = bots.id)`,
@@ -205,6 +217,8 @@ export class BotService {
           ...(input.llmEnabled !== undefined ? { llmEnabled: input.llmEnabled } : {}),
           ...(input.systemPrompt !== undefined ? { systemPrompt: input.systemPrompt } : {}),
           ...(input.pauseAfterFallbacks !== undefined ? { pauseAfterFallbacks: input.pauseAfterFallbacks } : {}),
+          ...(input.greetingQuickReplies !== undefined ? { greetingQuickReplies: cleanQuickReplies(input.greetingQuickReplies) } : {}),
+          ...(input.waitMessage !== undefined ? { waitMessage: input.waitMessage } : {}),
         })
         .returning();
       return row;
@@ -223,9 +237,11 @@ export class BotService {
       'llmEnabled',
       'systemPrompt',
       'pauseAfterFallbacks',
+      'waitMessage',
     ] as const) {
       if (input[key] !== undefined) values[key] = input[key];
     }
+    if (input.greetingQuickReplies !== undefined) values.greetingQuickReplies = cleanQuickReplies(input.greetingQuickReplies);
     const [row] = await this.db
       .update(bots)
       .set(values)
@@ -281,6 +297,7 @@ export class BotService {
         matchMode: input.matchMode ?? 'contains',
         priority: input.priority ?? 0,
         answer: input.answer ?? '',
+        quickReplies: cleanQuickReplies(input.quickReplies ?? []),
         enabled: input.enabled ?? true,
         createdBy: userId,
       })
@@ -341,6 +358,7 @@ export class BotService {
       matchMode: input.matchMode ?? 'contains',
       priority: input.priority ?? 0,
       answer: input.answer,
+      ...(input.quickReplies !== undefined ? { quickReplies: cleanQuickReplies(input.quickReplies) } : {}),
       enabled: input.enabled ?? true,
     });
     const toCreate = inputs.filter((i) => !i.replaceId);
@@ -372,6 +390,7 @@ export class BotService {
     for (const key of ['name', 'keywords', 'matchMode', 'priority', 'answer', 'enabled'] as const) {
       if (input[key] !== undefined) values[key] = input[key];
     }
+    if (input.quickReplies !== undefined) values.quickReplies = cleanQuickReplies(input.quickReplies);
     const [row] = await this.db
       .update(botRules)
       .set(values)
@@ -391,6 +410,26 @@ export class BotService {
     return { ok: true };
   }
 
+  /** Ids that are not rules of this bot are skipped; the count tells the caller how many actually changed. */
+  async setRulesEnabled(workspaceId: string, botId: string, ids: string[], enabled: boolean) {
+    await this.getActiveBot(workspaceId, botId);
+    const rows = await this.db
+      .update(botRules)
+      .set({ enabled, updatedAt: new Date() })
+      .where(and(eq(botRules.botId, botId), inArray(botRules.id, ids)))
+      .returning({ id: botRules.id });
+    return { updated: rows.length };
+  }
+
+  async deleteRules(workspaceId: string, botId: string, ids: string[]) {
+    await this.getActiveBot(workspaceId, botId);
+    const rows = await this.db
+      .delete(botRules)
+      .where(and(eq(botRules.botId, botId), inArray(botRules.id, ids)))
+      .returning({ id: botRules.id });
+    return { deleted: rows.length };
+  }
+
   /** rule → LLM → fallback. Never throws. */
   async resolve(
     bot: typeof bots.$inferSelect,
@@ -399,7 +438,7 @@ export class BotService {
     text: string,
   ): Promise<ResolveResult> {
     const rule = this.matchRule(text, rules);
-    if (rule) return { text: rule.answer, source: 'rule', ruleId: rule.id };
+    if (rule) return { text: rule.answer, source: 'rule', ruleId: rule.id, quickReplies: rule.quickReplies ?? [] };
 
     if (bot.llmEnabled) {
       try {

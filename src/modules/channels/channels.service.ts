@@ -14,7 +14,7 @@ import { DRIZZLE, Db } from '../../db/db.module';
 import { channels, bots, conversations, customers, webhookEvents, workspaces } from '../../db/schema';
 import { decryptCredential, encryptCredential } from '../../common/crypto';
 import { uuidv7 } from '../../common/uuidv7';
-import { AdapterChannel, Provider } from './adapter.types';
+import { AdapterChannel, MessengerProfile, Provider, SendError } from './adapter.types';
 import { AdapterRegistry } from './adapter.registry';
 
 function isUniqueViolation(err: unknown): boolean {
@@ -123,7 +123,11 @@ export class ChannelsService {
     if (input.externalId !== undefined) values.externalId = input.externalId;
     if (input.botId !== undefined) values.botId = input.botId;
     if (input.status !== undefined) values.status = input.status;
-    if (input.config !== undefined) values.config = input.config;
+    if (input.config !== undefined) {
+      // The menu is edited through its own endpoint; a general edit must not wipe it.
+      const kept = (existing.config as Record<string, unknown> | null)?.messengerProfile;
+      values.config = kept !== undefined ? { messengerProfile: kept, ...input.config } : input.config;
+    }
     if (input.credentialExpiresAt !== undefined) {
       values.credentialExpiresAt = input.credentialExpiresAt ? new Date(input.credentialExpiresAt) : null;
     }
@@ -194,6 +198,32 @@ export class ChannelsService {
       throw err;
     }
     return result;
+  }
+
+  /** Pushes Get Started + persistent menu to Meta first; it is saved only when Meta accepted it. */
+  async updateMessengerProfile(workspaceId: string, id: string, profile: MessengerProfile) {
+    const row = await this.getRow(workspaceId, id);
+    const adapter = this.adapters.get(row.provider as Provider);
+    if (!adapter.syncProfile) {
+      throw new BadRequestException({
+        code: 'PROFILE_NOT_SUPPORTED',
+        message: `Kênh ${row.provider} không hỗ trợ nút Bắt đầu và menu cố định, chỉ kênh Messenger có.`,
+      });
+    }
+    try {
+      await adapter.syncProfile(this.toAdapterChannel(row), profile);
+    } catch (err) {
+      if (!(err instanceof SendError)) throw err;
+      this.logger.warn({ msg: 'Đồng bộ Messenger profile thất bại', workspaceId, channelId: id, code: err.code, error: err.message });
+      throw new BadRequestException({ code: 'PROFILE_SYNC_FAILED', message: err.message });
+    }
+    const config = { ...((row.config ?? {}) as Record<string, unknown>), messengerProfile: profile };
+    const [updated] = await this.db
+      .update(channels)
+      .set({ config, updatedAt: new Date() })
+      .where(and(eq(channels.workspaceId, workspaceId), eq(channels.id, id)))
+      .returning();
+    return this.toPublic(updated);
   }
 
   async findForWebhook(provider: Provider, externalId: string) {

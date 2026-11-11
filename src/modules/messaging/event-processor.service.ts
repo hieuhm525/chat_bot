@@ -1,25 +1,42 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, Db } from '../../db/db.module';
 import { botRules, bots, conversations, customers, messages, outbox, webhookEvents, workspaces } from '../../db/schema';
 import { ChannelsService } from '../channels/channels.service';
 import { AdapterRegistry } from '../channels/adapter.registry';
-import { AdapterChannel, NormalizedEvent, Provider } from '../channels/adapter.types';
-import { BotService, RuleCandidate } from '../bot/bot.service';
+import { AdapterChannel, GET_STARTED_PAYLOAD, NormalizedEvent, Provider } from '../channels/adapter.types';
+import { BotService, ResolveResult, RuleCandidate } from '../bot/bot.service';
 import { ChatMessage } from '../bot/llm.service';
 import { writeMessage } from './message-writer';
 import { tenantBlocked } from '../../common/tenant-status';
+import { splitReply, typingDelayMs } from '../../common/reply-pacing';
+import { OutboundService } from './outbound.service';
 
 const UNSUPPORTED_REPLY = 'Dạ em chưa xem được ảnh/file, anh/chị nhắn chữ giúp em ạ.';
 const HISTORY_LIMIT = 10;
+/** Past this, the customer gets the bot's wait message while the LLM keeps working. */
+const WAIT_MESSAGE_AFTER_MS = 6000;
+/** Messenger avatar URLs are signed and expire, so profiles are refreshed about daily. */
+const PROFILE_TTL_MS = 24 * 3600 * 1000;
+
+type CustomerRow = typeof customers.$inferSelect;
+
+interface ReplyPart {
+  senderType: 'bot' | 'system';
+  content: string;
+  metadata: Record<string, unknown>;
+}
 
 @Injectable()
 export class EventProcessor {
+  private readonly logger = new Logger(EventProcessor.name);
+
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
     private readonly channels: ChannelsService,
     private readonly adapters: AdapterRegistry,
     private readonly bot: BotService,
+    private readonly outbound: OutboundService,
   ) {}
 
   async process(webhookEventId: string): Promise<void> {
@@ -102,7 +119,7 @@ export class EventProcessor {
         .onConflictDoNothing()
         .returning({ id: messages.id });
 
-      if (!inserted.length) return { duplicate: true as const, conversation };
+      if (!inserted.length) return { duplicate: true as const, conversation, customer };
 
       const [{ count }] = await tx
         .select({ count: sql<number>`count(*)::int` })
@@ -114,8 +131,18 @@ export class EventProcessor {
         .set({ lastMessageAt: event.occurredAt, messageCount: count, updatedAt: new Date() })
         .where(eq(conversations.id, conversation.id));
 
-      return { duplicate: false as const, conversation, isFirst: count === 1 };
+      return { duplicate: false as const, conversation, customer, isFirst: count === 1 };
     });
+
+    // Runs beside the bot reply: a slow or failing profile API must never delay or block the answer.
+    this.refreshProfile(channel, inbound.customer).catch((err) =>
+      this.logger.warn({
+        msg: 'Cập nhật profile khách thất bại, hội thoại vẫn hiện ID khách',
+        channelId: channel.id,
+        customerId: inbound.customer.id,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
 
     if (inbound.duplicate || inbound.conversation.mode !== 'bot') return;
 
@@ -132,38 +159,78 @@ export class EventProcessor {
 
     const bot = await this.resolveBot(channel);
     if (!bot || !bot.enabled) return;
+
+    // Cosmetic only: runs beside the answer, so a failing typing call never delays or blocks the reply.
+    this.showTyping(channel, event).catch((err) =>
+      this.logger.warn({
+        msg: 'Không hiện được trạng thái "đang nhắn", bot vẫn trả lời bình thường',
+        channelId: channel.id,
+        provider: channel.provider,
+        externalUserId: event.externalUserId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+
+    // Get Started is a greeting request, not a question: answer with the greeting and never count a fallback.
+    if (event.postback === GET_STARTED_PAYLOAD) {
+      if (!bot.greeting) return;
+      await this.queueReply(channel, bot.id, inbound.conversation.id, [
+        {
+          senderType: 'bot',
+          content: bot.greeting,
+          metadata: { kind: 'greeting', ...(bot.greetingQuickReplies.length ? { quickReplies: bot.greetingQuickReplies } : {}) },
+        },
+      ]);
+      return;
+    }
+
     const rules = (await this.db.select().from(botRules).where(eq(botRules.botId, bot.id))) as RuleCandidate[];
 
-    const result =
+    const resolving: Promise<ResolveResult> =
       event.contentType && event.contentType !== 'text'
-        ? { text: UNSUPPORTED_REPLY, source: 'fallback' as const }
-        : await this.bot.resolve(bot, rules, await this.loadHistory(inbound.conversation.id), event.text ?? '');
+        ? Promise.resolve({ text: UNSUPPORTED_REPLY, source: 'fallback' as const })
+        : this.loadHistory(inbound.conversation.id).then((history) =>
+            this.bot.resolve(bot, rules, history, event.text ?? ''),
+          );
+    const { result, waited } = await this.awaitWithWaitMessage(channel, bot, inbound.conversation.id, resolving);
 
     const greeting = inbound.isFirst && bot.greeting ? bot.greeting : null;
     const fallbackCount = result.source === 'fallback' ? inbound.conversation.fallbackCount + 1 : 0;
     const handoff = fallbackCount >= bot.pauseAfterFallbacks;
 
-    const parts: Array<{
-      senderType: 'bot' | 'system';
-      content: string;
-      metadata: Record<string, unknown>;
-    }> = [];
+    const parts: ReplyPart[] = [];
     if (greeting) parts.push({ senderType: 'bot', content: greeting, metadata: { kind: 'greeting' } });
-    parts.push({
-      senderType: 'bot',
-      content: result.text,
-      metadata: {
-        kind: 'answer',
-        source: result.source,
-        ruleId: result.ruleId,
-        model: result.model,
-        provider: result.provider,
-        tokensIn: result.tokensIn,
-        tokensOut: result.tokensOut,
-        latencyMs: result.latencyMs,
-        ...(handoff ? { handoff: true } : {}),
-      },
-    });
+    const chunks = splitReply(result.text, this.adapters.get(channel.provider).capabilities().maxTextLength);
+    for (const [index, chunk] of chunks.entries()) {
+      const last = index === chunks.length - 1;
+      parts.push({
+        senderType: 'bot',
+        content: chunk,
+        metadata:
+          index === 0
+            ? {
+                kind: 'answer',
+                source: result.source,
+                ruleId: result.ruleId,
+                model: result.model,
+                provider: result.provider,
+                tokensIn: result.tokensIn,
+                tokensOut: result.tokensOut,
+                latencyMs: result.latencyMs,
+                ...(chunks.length > 1 ? { part: 1, parts: chunks.length } : {}),
+                ...(handoff ? { handoff: true } : {}),
+                ...(last && !handoff && result.quickReplies?.length ? { quickReplies: result.quickReplies } : {}),
+              }
+            : {
+                kind: 'answer',
+                source: result.source,
+                part: index + 1,
+                parts: chunks.length,
+                ...(handoff ? { handoff: true } : {}),
+                ...(last && !handoff && result.quickReplies?.length ? { quickReplies: result.quickReplies } : {}),
+              },
+      });
+    }
     if (handoff) {
       parts.push({ senderType: 'bot', content: bot.handoffMessage, metadata: { kind: 'handoff', afterFallbacks: fallbackCount } });
       parts.push({
@@ -173,16 +240,37 @@ export class EventProcessor {
       });
     }
 
+    // A slow LLM already made the customer wait, so its first message goes out at once.
+    const skipFirstDelay = !greeting && (result.source === 'llm' || waited);
+    await this.queueReply(channel, bot.id, inbound.conversation.id, parts, skipFirstDelay, (tx, id) =>
+      tx
+        .update(conversations)
+        .set({ fallbackCount, mode: handoff ? 'human' : 'bot', botId: bot.id, updatedAt: new Date() })
+        .where(eq(conversations.id, id)),
+    );
+  }
+
+  /**
+   * Stores the reply and schedules each bot message a "typing time" after the previous one,
+   * so the typing bubble shows for a believable moment and multi-part replies arrive one by one.
+   * Nothing is written when a human took over the thread in the meantime.
+   */
+  private async queueReply(
+    channel: AdapterChannel,
+    botId: string,
+    conversationId: string,
+    parts: ReplyPart[],
+    skipFirstDelay = false,
+    afterWrite?: (tx: Db, conversationId: string) => Promise<unknown>,
+  ): Promise<void> {
     await this.db.transaction(async (tx) => {
-      const [fresh] = await tx
-        .select()
-        .from(conversations)
-        .where(eq(conversations.id, inbound.conversation.id))
-        .limit(1);
+      const [fresh] = await tx.select().from(conversations).where(eq(conversations.id, conversationId)).limit(1);
       if (!fresh || fresh.mode !== 'bot') return;
 
       // One millisecond apart: now() is the transaction time, so (created_at, id) needs a real order.
       const base = Date.now();
+      let sendAt = base;
+      let firstBot = true;
       for (const [index, part] of parts.entries()) {
         const message = await writeMessage(tx, {
           workspaceId: channel.workspaceId,
@@ -190,31 +278,117 @@ export class EventProcessor {
           conversationId: fresh.id,
           direction: 'out',
           senderType: part.senderType,
-          botId: part.senderType === 'bot' ? bot.id : null,
+          botId: part.senderType === 'bot' ? botId : null,
           content: part.content,
           status: part.senderType === 'bot' ? 'queued' : 'sent',
           metadata: part.metadata,
           createdAt: new Date(base + index),
         });
-        if (part.senderType === 'bot') {
-          await tx.insert(outbox).values({
-            workspaceId: channel.workspaceId,
-            kind: 'send_message',
-            payload: { messageId: message.id },
-          });
-        }
+        if (part.senderType !== 'bot') continue;
+        if (!(firstBot && skipFirstDelay)) sendAt += typingDelayMs(part.content);
+        firstBot = false;
+        await tx.insert(outbox).values({
+          workspaceId: channel.workspaceId,
+          kind: 'send_message',
+          payload: { messageId: message.id },
+          nextAttemptAt: new Date(sendAt),
+        });
       }
-
-      await tx
-        .update(conversations)
-        .set({
-          fallbackCount,
-          mode: handoff ? 'human' : fresh.mode,
-          botId: bot.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(conversations.id, fresh.id));
+      await afterWrite?.(tx, fresh.id);
     });
+  }
+
+  /**
+   * Waits for the answer; if it takes longer than WAIT_MESSAGE_AFTER_MS (slow LLM), sends the bot's
+   * wait message first so the customer is not left staring at a typing bubble that eventually times out.
+   */
+  private async awaitWithWaitMessage(
+    channel: AdapterChannel,
+    bot: typeof bots.$inferSelect,
+    conversationId: string,
+    resolving: Promise<ResolveResult>,
+  ): Promise<{ result: ResolveResult; waited: boolean }> {
+    if (!bot.waitMessage.trim()) return { result: await resolving, waited: false };
+    let timer: NodeJS.Timeout | undefined;
+    const slow = new Promise<'slow'>((resolve) => {
+      timer = setTimeout(() => resolve('slow'), WAIT_MESSAGE_AFTER_MS);
+    });
+    const first = await Promise.race([resolving, slow]);
+    clearTimeout(timer);
+    if (first !== 'slow') return { result: first, waited: false };
+
+    await this.sendWaitMessage(channel, bot, conversationId).catch((err) =>
+      this.logger.warn({
+        msg: 'Gửi tin chờ khi LLM chậm thất bại, vẫn chờ câu trả lời chính',
+        channelId: channel.id,
+        conversationId,
+        botId: bot.id,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return { result: await resolving, waited: true };
+  }
+
+  /**
+   * Sent right away instead of via the outbox: the worker is busy running this very event,
+   * so a queued job would only go out after the answer. The outbox only takes over on retry.
+   */
+  private async sendWaitMessage(channel: AdapterChannel, bot: typeof bots.$inferSelect, conversationId: string) {
+    const messageId = await this.db.transaction(async (tx) => {
+      const [fresh] = await tx.select().from(conversations).where(eq(conversations.id, conversationId)).limit(1);
+      if (!fresh || fresh.mode !== 'bot') return null;
+      const message = await writeMessage(tx, {
+        workspaceId: channel.workspaceId,
+        channelId: channel.id,
+        conversationId,
+        direction: 'out',
+        senderType: 'bot',
+        botId: bot.id,
+        content: bot.waitMessage.trim(),
+        status: 'queued',
+        metadata: { kind: 'wait', afterMs: WAIT_MESSAGE_AFTER_MS },
+      });
+      return message.id;
+    });
+    if (!messageId) return;
+    try {
+      await this.outbound.send(messageId);
+    } catch (err) {
+      // Retryable failure: hand it to the outbox so it is retried and does not block the answer forever.
+      await this.db.insert(outbox).values({ workspaceId: channel.workspaceId, kind: 'send_message', payload: { messageId } });
+      throw err;
+    }
+  }
+
+  /**
+   * Fills in the customer's name and avatar from the provider. Failures are recorded on the
+   * profile too, so a Page without the needed permission is not asked again on every message.
+   */
+  private async refreshProfile(channel: AdapterChannel, customer: CustomerRow): Promise<void> {
+    const adapter = this.adapters.get(channel.provider);
+    if (!adapter.fetchProfile) return;
+    const profile = (customer.profile ?? {}) as { fetchedAt?: string };
+    const fetchedAt = profile.fetchedAt ? Date.parse(profile.fetchedAt) : NaN;
+    // Never fetched (NaN) or older than a day: fetch again.
+    if (Date.now() - fetchedAt < PROFILE_TTL_MS) return;
+
+    const now = new Date().toISOString();
+    try {
+      const fetched = await adapter.fetchProfile(channel, customer.externalUserId);
+      await this.db
+        .update(customers)
+        .set({
+          displayName: fetched.name ?? customer.displayName,
+          profile: { ...profile, avatarUrl: fetched.avatarUrl ?? null, fetchedAt: now, error: null },
+        })
+        .where(eq(customers.id, customer.id));
+    } catch (err) {
+      await this.db
+        .update(customers)
+        .set({ profile: { ...profile, fetchedAt: now, error: err instanceof Error ? err.message : String(err) } })
+        .where(eq(customers.id, customer.id));
+      throw err;
+    }
   }
 
   /** A reply typed directly in the Page Inbox: store it as an outbound agent message. */
@@ -308,6 +482,12 @@ export class EventProcessor {
     await this.db.update(messages).set({ status: event.status, updatedAt: new Date() }).where(eq(messages.id, message.id));
   }
 
+  private async showTyping(channel: AdapterChannel, event: NormalizedEvent): Promise<void> {
+    const adapter = this.adapters.get(channel.provider);
+    if (!adapter.showTyping || !event.externalUserId) return;
+    await adapter.showTyping(channel, event.externalUserId, event.providerMessageId);
+  }
+
   /** Only the channel's own bot; no fallback, so the answer is always predictable. */
   private async resolveBot(channel: AdapterChannel) {
     if (!channel.botId) return null;
@@ -328,7 +508,8 @@ export class EventProcessor {
       .limit(HISTORY_LIMIT);
     return rows
       .reverse()
-      .filter((m) => m.contentType === 'text')
+      // The wait message is filler; feeding it back would teach the LLM to stall.
+      .filter((m) => m.contentType === 'text' && (m.metadata as { kind?: string } | null)?.kind !== 'wait')
       .map((m) => ({ role: m.senderType === 'customer' ? 'user' : 'assistant', content: m.content }) as ChatMessage);
   }
 

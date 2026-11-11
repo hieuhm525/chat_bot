@@ -1,6 +1,6 @@
 import { SetMetadata } from '@nestjs/common';
 
-export type Role = 'admin' | 'owner' | 'agent';
+export type Role = 'admin' | 'owner';
 export const ROLES_KEY = 'roles';
 
 /** Endpoints without @Roles are denied by RolesGuard (deny by default). */
