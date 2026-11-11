@@ -111,6 +111,14 @@ export class OutboundService {
     }
   }
 
+  /** Called when the outbox stops retrying, so the message no longer blocks later ones. */
+  async giveUp(id: string) {
+    await this.db
+      .update(messages)
+      .set({ status: 'failed', errorCode: 'send_gave_up', updatedAt: new Date() })
+      .where(and(eq(messages.id, id), eq(messages.status, 'queued')));
+  }
+
   private async fail(id: string, code: string) {
     await this.db
       .update(messages)

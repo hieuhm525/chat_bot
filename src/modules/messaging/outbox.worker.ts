@@ -86,6 +86,8 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
       const message = err instanceof Error ? err.message : String(err);
       if (job.attempts >= MAX_ATTEMPTS) {
         await this.pool.query(`UPDATE outbox SET status='failed', last_error=$2 WHERE id=$1`, [job.id, message]);
+        // A message left 'queued' would block every later reply in its conversation (ordering guard).
+        if (job.kind === 'send_message' && job.payload.messageId) await this.outbound.giveUp(job.payload.messageId);
         this.logger.error(`Outbox ${job.id} thất bại sau ${job.attempts} lần: ${message}`);
         return;
       }
