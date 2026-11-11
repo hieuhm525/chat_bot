@@ -20,7 +20,8 @@ Tài liệu này mô tả đường đi của một tin nhắn qua hệ thống.
    - `resolve()`: khớp `rule` (`scoreRule` + `matchRule`) → nếu không khớp và bot bật LLM thì gọi `src/modules/bot/llm.service.ts` (chuỗi provider theo `priority`) → cuối cùng là `fallbackMessage`. Không bao giờ ném lỗi.
    - Lưu `metadata.source` (`rule` / `llm` / `fallback`), kèm ruleId, model, token, latency.
    - Tin dài được cắt theo `maxTextLength` của adapter; mỗi phần cách nhau một độ trễ "đang nhắn" (`src/modules/messaging/reply-pacing.ts`).
-   - Ghi từng tin bot `status='queued'` qua `message-writer.ts` và tạo job `outbox` kind `send_message` trong cùng transaction. Tin hệ thống (chào, chuyển nhân viên) ghi `status='sent'`.
+   - Ghi từng tin `sender_type='bot'` (gồm cả lời chào `kind='greeting'`, câu chuyển người `kind='handoff'`, tin chờ `kind='wait'`) với `status='queued'` qua `message-writer.ts` và tạo job `outbox` kind `send_message` trong cùng transaction; `next_attempt_at` được dời theo `typingDelayMs` để các phần ra cách nhau.
+   - Tin `sender_type='system'` (ghi chú nội bộ như auto-handoff) ghi thẳng `status='sent'`, **không** có job outbox, không gửi cho khách.
 
 ## Tin ra (bot/agent → khách)
 
@@ -44,7 +45,7 @@ Lấy từ check constraint trong `src/db/schema.ts`:
 
 | Giá trị | Ý nghĩa |
 |---|---|
-| `received` | Tin khách đã lưu, chưa xử lý xong |
+| `received` | Tin vào từ khách (giữ nguyên trạng thái này, không đổi sau khi bot trả lời) |
 | `queued` | Tin ra đang chờ worker gửi |
 | `sent` | Provider đã nhận (có `provider_message_id`) |
 | `delivered` | Provider báo đã tới thiết bị khách |
