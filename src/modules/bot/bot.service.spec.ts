@@ -28,6 +28,14 @@ describe('scoreRule', () => {
     expect(scoreRule('giao hàng và phí ship', r)).toBeGreaterThan(0);
   });
 
+  it('answers abbreviated and unaccented messages', () => {
+    const r = rule({ keywords: ['phí ship', 'bao nhiêu'] });
+    expect(scoreRule('phi ship bn vay shop', r)).toBeGreaterThan(0);
+    expect(scoreRule('fí shipp bnh', r)).toBe(0); // "fí" is not "phí": no guessing at misspellings
+    const transfer = rule({ keywords: ['chuyển khoản', 'số tài khoản'] });
+    expect(scoreRule('cho e xin stk de ck', transfer)).toBeGreaterThan(0);
+  });
+
   it('does not match inside another word', () => {
     expect(scoreRule('giagiao', rule({ keywords: ['giá giao'] }))).toBe(0);
   });
