@@ -1,5 +1,19 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
-import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 import { AuthUser, CurrentUser } from '../../common/current-user.decorator';
 import { Roles } from '../../common/roles.decorator';
 import { BotInput, BotService } from './bot.service';
@@ -33,6 +47,19 @@ class CreateRuleDto {
   @IsOptional() @IsInt() priority?: number;
   @IsString() answer!: string;
   @IsOptional() @IsBoolean() enabled?: boolean;
+}
+
+class BulkRuleDto extends CreateRuleDto {
+  @IsOptional() @IsUUID() replaceId?: string;
+}
+
+class BulkRulesDto {
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => BulkRuleDto)
+  items!: BulkRuleDto[];
+}
+
+class GenerateRulesDto {
+  @IsString() @MinLength(1) @MaxLength(30000) text!: string;
 }
 
 class UpdateRuleDto {
@@ -90,6 +117,24 @@ export class BotController {
     @Body() dto: CreateRuleDto,
   ) {
     return this.bot.createRule(user.workspaceId, botId, user.id, dto);
+  }
+
+  @Post(':botId/rules/generate')
+  generateRules(
+    @CurrentUser() user: AuthUser,
+    @Param('botId', ParseUUIDPipe) botId: string,
+    @Body() dto: GenerateRulesDto,
+  ) {
+    return this.bot.generateRules(user.workspaceId, botId, dto.text);
+  }
+
+  @Post(':botId/rules/bulk')
+  createRules(
+    @CurrentUser() user: AuthUser,
+    @Param('botId', ParseUUIDPipe) botId: string,
+    @Body() dto: BulkRulesDto,
+  ) {
+    return this.bot.createRules(user.workspaceId, botId, user.id, dto.items);
   }
 
   @Patch(':botId/rules/:id')

@@ -9,6 +9,7 @@ import { Conversations } from './routes/conversations';
 import { Channels } from './routes/channels';
 import { Bots } from './routes/bot';
 import { BotDetail } from './routes/bot-detail';
+import { RuleImport } from './routes/rule-import';
 import { Members } from './routes/members';
 import { Tenants } from './routes/tenants';
 import { Providers } from './routes/providers';
@@ -144,6 +145,7 @@ export function App() {
             {isOwner && <Route path="/channels" element={<Channels />} />}
             {isOwner && <Route path="/bots" element={<Bots />} />}
             {isOwner && <Route path="/bots/:botId" element={<BotDetail />} />}
+            {isOwner && <Route path="/bots/:botId/import" element={<RuleImport />} />}
             {isOwner && <Route path="/members" element={<Members />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

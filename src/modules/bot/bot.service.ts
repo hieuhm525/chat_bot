@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, Db } from '../../db/db.module';
 import { botRules, bots, channels, messages, workspaces } from '../../db/schema';
@@ -24,6 +24,87 @@ export interface RuleCandidate {
   priority: number;
   answer: string;
   enabled: boolean;
+}
+
+export interface DraftRule {
+  name: string;
+  keywords: string[];
+  answer: string;
+}
+
+export interface RuleInput {
+  /** When set, overwrite this existing rule instead of creating a new one. */
+  replaceId?: string;
+  name: string;
+  keywords: string[];
+  answer: string;
+  matchMode?: string;
+  priority?: number;
+  enabled?: boolean;
+}
+
+const GENERATE_CHUNK_CHARS = 6000;
+const GENERATE_MAX_TOKENS = 4000;
+const GENERATE_TIMEOUT_MS = 60_000;
+
+const GENERATE_PROMPT = [
+  'Bạn tách tài liệu của cửa hàng thành các rule hỏi-đáp cho chatbot chăm sóc khách hàng.',
+  'Chỉ dùng thông tin có trong tài liệu, không bịa thêm giá, chính sách hay số liệu.',
+  'Mỗi rule là một chủ đề khách hay hỏi. Trả lời CHỈ bằng một mảng JSON, không giải thích, dạng:',
+  '[{"name":"Tên chủ đề ngắn","keywords":["cụm từ 1","cụm từ 2"],"answer":"Câu trả lời gửi khách"}]',
+  'Quy tắc keyword: 2-4 cụm, mỗi cụm 2-4 từ tiếng Việt có dấu mà khách hay gõ khi hỏi chủ đề đó (ví dụ "phí ship", "giao hàng").',
+  'Bot chỉ trả lời khi tin nhắn chứa ít nhất 60% số keyword, nên các keyword phải là cách nói thường đi cùng nhau, không liệt kê nhiều từ đồng nghĩa.',
+  'Câu trả lời lịch sự, ngắn gọn, xưng "em" gọi khách là "anh/chị".',
+  'Nếu tài liệu không có thông tin hỏi-đáp nào, trả về [].',
+].join('\n');
+
+/** Splits on blank lines so a chunk never cuts a paragraph in half (unless the paragraph alone is too long). */
+export function chunkText(text: string, size = GENERATE_CHUNK_CHARS): string[] {
+  const chunks: string[] = [];
+  let current = '';
+  for (const para of text.split(/\n\s*\n/)) {
+    const piece = para.trim();
+    if (!piece) continue;
+    if (current && current.length + piece.length + 2 > size) {
+      chunks.push(current);
+      current = '';
+    }
+    if (piece.length > size) {
+      for (let i = 0; i < piece.length; i += size) chunks.push(piece.slice(i, i + size));
+      continue;
+    }
+    current = current ? `${current}\n\n${piece}` : piece;
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+/** Reads the JSON array an LLM returned, tolerating ```json fences and surrounding prose. Null when unusable. */
+export function parseDraftRules(raw: string): DraftRule[] | null {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const body = fenced ? fenced[1] : raw;
+  const start = body.indexOf('[');
+  const end = body.lastIndexOf(']');
+  if (start < 0 || end < start) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const items: DraftRule[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue;
+    const { name, keywords, answer } = item as Record<string, unknown>;
+    if (typeof name !== 'string' || typeof answer !== 'string' || !Array.isArray(keywords)) continue;
+    const cleanKeywords = [
+      ...new Set(keywords.filter((k): k is string => typeof k === 'string').map((k) => k.trim())),
+    ].filter((k) => normalizeText(k).length >= 3);
+    if (!name.trim() || !answer.trim() || !cleanKeywords.length) continue;
+    items.push({ name: name.trim(), keywords: cleanKeywords, answer: answer.trim() });
+  }
+  return items;
 }
 
 export interface BotInput {
@@ -205,6 +286,84 @@ export class BotService {
       })
       .returning();
     return row;
+  }
+
+  /** Asks the LLM to turn a pasted document into draft rules. Writes nothing; the owner reviews first. */
+  async generateRules(workspaceId: string, botId: string, text: string): Promise<{ items: DraftRule[] }> {
+    await this.getActiveBot(workspaceId, botId);
+    const chunks = chunkText(text);
+    if (!chunks.length) throw new BadRequestException('Tài liệu trống');
+
+    const drafts: DraftRule[] = [];
+    let parsedAny = false;
+    let lastError: unknown;
+    for (const chunk of chunks) {
+      try {
+        const result = await this.llm.complete(
+          [
+            { role: 'system', content: GENERATE_PROMPT },
+            { role: 'user', content: chunk },
+          ],
+          { maxTokens: GENERATE_MAX_TOKENS, timeoutMs: GENERATE_TIMEOUT_MS },
+        );
+        const items = parseDraftRules(result.text);
+        if (items) {
+          parsedAny = true;
+          drafts.push(...items);
+        }
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    if (!parsedAny) {
+      const reason = lastError instanceof Error ? `: ${lastError.message}` : '';
+      throw new BadRequestException(`LLM không trả về danh sách rule hợp lệ${reason}`);
+    }
+
+    // The same topic often shows up in two chunks. Overlap with existing rules is checked in the
+    // preview (shared with the CSV path), so it updates as the owner edits keywords.
+    const seen = new Set<string>();
+    const items = drafts.filter((draft) => {
+      const key = normalizeText(draft.name);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return { items };
+  }
+
+  /** Creates and overwrites rules in one transaction, so a bad row leaves nothing half-imported. */
+  async createRules(workspaceId: string, botId: string, userId: string, inputs: RuleInput[]) {
+    await this.getActiveBot(workspaceId, botId);
+    const clean = (input: RuleInput) => ({
+      name: input.name.trim(),
+      keywords: input.keywords.map((k) => k.trim()).filter(Boolean),
+      matchMode: input.matchMode ?? 'contains',
+      priority: input.priority ?? 0,
+      answer: input.answer,
+      enabled: input.enabled ?? true,
+    });
+    const toCreate = inputs.filter((i) => !i.replaceId);
+    const toReplace = inputs.filter((i) => i.replaceId);
+    if (new Set(toReplace.map((i) => i.replaceId)).size !== toReplace.length) {
+      throw new BadRequestException('Mỗi rule cũ chỉ được ghi đè một lần');
+    }
+
+    return this.db.transaction(async (tx) => {
+      for (const input of toReplace) {
+        const [row] = await tx
+          .update(botRules)
+          .set({ ...clean(input), updatedAt: new Date() })
+          .where(and(eq(botRules.botId, botId), eq(botRules.id, input.replaceId!)))
+          .returning({ id: botRules.id });
+        // Throwing rolls back everything, including rules updated earlier in the loop.
+        if (!row) throw new NotFoundException(`Không tìm thấy rule cần ghi đè: ${input.name}`);
+      }
+      if (toCreate.length) {
+        await tx.insert(botRules).values(toCreate.map((input) => ({ botId, createdBy: userId, ...clean(input) })));
+      }
+      return { created: toCreate.length, updated: toReplace.length };
+    });
   }
 
   async updateRule(workspaceId: string, botId: string, id: string, input: Partial<RuleCandidate>) {

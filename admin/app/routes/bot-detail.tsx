@@ -160,7 +160,10 @@ export function BotDetail() {
         <button type="submit">Lưu cấu hình</button>
       </form>
 
-      <h2>Rule</h2>
+      <div className="section-head">
+        <h2>Rule</h2>
+        <Link to={`/bots/${botId}/import`}>Nhập hàng loạt (AI / CSV)</Link>
+      </div>
       <table>
         <thead>
           <tr>

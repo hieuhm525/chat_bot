@@ -14,6 +14,12 @@ export interface LlmProvider {
   apiKey?: string;
 }
 
+/** Overrides for long jobs (e.g. generating FAQ rules) that need more room than a chat reply. */
+export interface CallOptions {
+  maxTokens?: number;
+  timeoutMs?: number;
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -103,7 +109,7 @@ export class LlmService implements OnModuleInit {
     return providers;
   }
 
-  async complete(messages: ChatMessage[]): Promise<LlmResult> {
+  async complete(messages: ChatMessage[], opts: CallOptions = {}): Promise<LlmResult> {
     let lastError: unknown;
     for (const provider of await this.list()) {
       if (!provider.apiKey && !isLocal(provider.baseUrl)) {
@@ -112,7 +118,7 @@ export class LlmService implements OnModuleInit {
       }
       const startedAt = Date.now();
       try {
-        const result = await this.call(provider, messages);
+        const result = await this.call(provider, messages, opts);
         if (result.text.trim()) return { ...result, text: result.text.trim(), latencyMs: Date.now() - startedAt };
       } catch (err) {
         lastError = err;
@@ -171,8 +177,9 @@ export class LlmService implements OnModuleInit {
   private async call(
     provider: LlmProvider,
     messages: ChatMessage[],
+    opts: CallOptions = {},
   ): Promise<Omit<LlmResult, 'latencyMs'> & { rateLimit?: RateLimit }> {
-    const maxTokens = this.config.getOrThrow<number>('LLM_MAX_TOKENS');
+    const maxTokens = opts.maxTokens ?? this.config.getOrThrow<number>('LLM_MAX_TOKENS');
     const res = await fetch(`${provider.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -187,7 +194,7 @@ export class LlmService implements OnModuleInit {
         // Gemini 3 always thinks and the thoughts count against max_tokens; keep them short.
         ...(/generativelanguage\.googleapis\.com/.test(provider.baseUrl) ? { reasoning_effort: 'low' } : {}),
       }),
-      signal: AbortSignal.timeout(this.config.getOrThrow<number>('LLM_TIMEOUT_MS')),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? this.config.getOrThrow<number>('LLM_TIMEOUT_MS')),
     });
     if (!res.ok) throw new Error(await httpError(res));
     const body = (await res.json()) as any;

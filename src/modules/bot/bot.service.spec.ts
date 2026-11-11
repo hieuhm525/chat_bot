@@ -1,4 +1,4 @@
-import { BotService, scoreRule, RuleCandidate } from './bot.service';
+import { BotService, chunkText, parseDraftRules, scoreRule, RuleCandidate } from './bot.service';
 
 const rule = (over: Partial<RuleCandidate> = {}): RuleCandidate => ({
   id: 'r1',
@@ -71,5 +71,69 @@ describe('BotService.resolve', () => {
       tokensOut: 7,
       latencyMs: 42,
     });
+  });
+});
+
+describe('parseDraftRules', () => {
+  it('reads a fenced JSON array and drops invalid items and short keywords', () => {
+    const raw = [
+      'Đây là kết quả:',
+      '```json',
+      JSON.stringify([
+        { name: 'Phí ship', keywords: ['phí ship', 'ab', 'phí ship'], answer: '30k' },
+        { name: 'Thiếu answer', keywords: ['giao hàng'] },
+        { name: 'Không keyword', keywords: ['ab'], answer: 'x' },
+      ]),
+      '```',
+    ].join('\n');
+    expect(parseDraftRules(raw)).toEqual([{ name: 'Phí ship', keywords: ['phí ship'], answer: '30k' }]);
+  });
+
+  it('returns null for unusable output', () => {
+    expect(parseDraftRules('xin lỗi, em không làm được')).toBeNull();
+    expect(parseDraftRules('[{oops')).toBeNull();
+  });
+});
+
+describe('chunkText', () => {
+  it('keeps paragraphs whole and splits oversized ones', () => {
+    expect(chunkText('a\n\nb', 10)).toEqual(['a\n\nb']);
+    expect(chunkText('aaaa\n\nbbbb', 6)).toEqual(['aaaa', 'bbbb']);
+    expect(chunkText('x'.repeat(12), 5)).toEqual(['xxxxx', 'xxxxx', 'xx']);
+    expect(chunkText('  \n\n ')).toEqual([]);
+  });
+});
+
+describe('BotService.generateRules', () => {
+  const dbWith = (existing: Array<{ id: string; name: string }>) => {
+    let call = 0;
+    const query = (rows: unknown[]) => {
+      const q: any = { from: () => q, where: () => q, limit: () => Promise.resolve(rows), then: (r: any) => Promise.resolve(rows).then(r) };
+      return q;
+    };
+    // First select is getActiveBot, second loads existing rule names.
+    return { select: () => query(call++ === 0 ? [{ id: 'b1' }] : existing) } as any;
+  };
+
+  it('drops drafts repeating a topic from another chunk', async () => {
+    const llm = {
+      complete: jest.fn().mockResolvedValue({
+        text: JSON.stringify([
+          { name: 'Giờ mở cửa', keywords: ['giờ mở cửa'], answer: '8h-20h' },
+          { name: 'Gio mo cua', keywords: ['mở cửa'], answer: 'trùng' },
+          { name: 'Đổi trả', keywords: ['đổi trả'], answer: '7 ngày' },
+        ]),
+      }),
+    };
+    const service = new BotService(dbWith([]), llm as any);
+    const { items } = await service.generateRules('w1', 'b1', 'tài liệu');
+    expect(items.map((i) => i.name)).toEqual(['Giờ mở cửa', 'Đổi trả']);
+    expect(llm.complete.mock.calls[0][1]).toMatchObject({ maxTokens: expect.any(Number) });
+  });
+
+  it('fails when no chunk yields valid JSON', async () => {
+    const llm = { complete: jest.fn().mockResolvedValue({ text: 'không biết' }) };
+    const service = new BotService(dbWith([]), llm as any);
+    await expect(service.generateRules('w1', 'b1', 'tài liệu')).rejects.toThrow('LLM không trả về');
   });
 });

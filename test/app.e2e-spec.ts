@@ -692,6 +692,8 @@ describe('bv-agent-msg e2e', () => {
       '/api/v1/bots': ['owner'],
       '/api/v1/bots/:botId': ['owner'],
       '/api/v1/bots/:botId/rules': ['owner'],
+      '/api/v1/bots/:botId/rules/generate': ['owner'],
+      '/api/v1/bots/:botId/rules/bulk': ['owner'],
       '/api/v1/bots/:botId/rules/:id': ['owner'],
       '/api/v1/channels': ['owner'],
       '/api/v1/channels/:id': ['owner'],
@@ -891,6 +893,68 @@ describe('bv-agent-msg e2e', () => {
       .post('/api/v1/tenants')
       .send({ name: 'X', username: 'newshop', password: 'password123' })
       .expect(403);
+  });
+
+  it('imports many rules at once and rejects a bad row without partial writes', async () => {
+    const before = await agent.get(`/api/v1/bots/${botId}/rules`).expect(200);
+    await agent
+      .post(`/api/v1/bots/${botId}/rules/bulk`)
+      .send({
+        items: [
+          { name: 'Bulk A', keywords: ['bulk a1', 'bulk a2'], answer: 'A' },
+          { name: 'Bulk B', keywords: ['bulk b1'], answer: 'B', priority: 5 },
+        ],
+      })
+      .expect(201)
+      .expect({ created: 2, updated: 0 });
+    await agent
+      .post(`/api/v1/bots/${botId}/rules/bulk`)
+      .send({ items: [{ name: 'Bulk C', keywords: ['bulk c'], answer: 'C' }, { name: 'Thiếu answer', keywords: ['x y'] }] })
+      .expect(400);
+    await agent.post(`/api/v1/bots/${botId}/rules/bulk`).send({ items: [] }).expect(400);
+
+    const after = await agent.get(`/api/v1/bots/${botId}/rules`).expect(200);
+    expect(after.body.length).toBe(before.body.length + 2);
+    const bulkB = after.body.find((r: { name: string }) => r.name === 'Bulk B');
+    expect(bulkB).toMatchObject({ priority: 5, enabled: true });
+
+    // Overwriting an existing rule happens in the same transaction as the inserts.
+    await agent
+      .post(`/api/v1/bots/${botId}/rules/bulk`)
+      .send({
+        items: [
+          { replaceId: bulkB.id, name: 'Bulk B mới', keywords: ['bulk b2'], answer: 'B2', priority: 5 },
+          { name: 'Bulk D', keywords: ['bulk d'], answer: 'D' },
+        ],
+      })
+      .expect(201)
+      .expect({ created: 1, updated: 1 });
+    // A replaceId from another bot rolls back the whole batch.
+    const foreign = await agent.post('/api/v1/bots').send({ name: 'Bot tạm' }).expect(201);
+    const foreignRule = await agent
+      .post(`/api/v1/bots/${foreign.body.id}/rules`)
+      .send({ name: 'Ngoài', keywords: ['ngoai bot'], answer: 'x' })
+      .expect(201);
+    await agent
+      .post(`/api/v1/bots/${botId}/rules/bulk`)
+      .send({
+        items: [
+          { name: 'Bulk E', keywords: ['bulk e'], answer: 'E' },
+          { replaceId: foreignRule.body.id, name: 'hack', keywords: ['hack it'], answer: 'x' },
+        ],
+      })
+      .expect(404);
+    await agent.delete(`/api/v1/bots/${foreign.body.id}`).expect(200);
+
+    const final = await agent.get(`/api/v1/bots/${botId}/rules`).expect(200);
+    const names = final.body.map((r: { name: string }) => r.name);
+    expect(names).toEqual(expect.arrayContaining(['Bulk A', 'Bulk B mới', 'Bulk D']));
+    expect(names).not.toContain('Bulk B');
+    expect(names).not.toContain('Bulk E');
+    expect(final.body.find((r: { id: string }) => r.id === bulkB.id)).toMatchObject({ answer: 'B2' });
+    for (const r of final.body.filter((r: { name: string }) => r.name.startsWith('Bulk'))) {
+      await agent.delete(`/api/v1/bots/${botId}/rules/${r.id}`).expect(200);
+    }
   });
 
   it('routes each channel to its own AI agent', async () => {
@@ -1615,6 +1679,8 @@ describe('bv-agent-msg e2e', () => {
       const samples: Record<string, string> = {
         '/api/v1/bots/:botId': `/api/v1/bots/${botBId}`,
         '/api/v1/bots/:botId/rules': `/api/v1/bots/${botBId}/rules`,
+        '/api/v1/bots/:botId/rules/generate': `/api/v1/bots/${botBId}/rules/generate`,
+        '/api/v1/bots/:botId/rules/bulk': `/api/v1/bots/${botBId}/rules/bulk`,
         '/api/v1/bots/:botId/rules/:id': `/api/v1/bots/${botBId}/rules/${ruleBId}`,
         '/api/v1/channels/:id': `/api/v1/channels/${channelBId}`,
         '/api/v1/channels/:id/test': `/api/v1/channels/${channelBId}/test`,
@@ -1632,6 +1698,8 @@ describe('bv-agent-msg e2e', () => {
       if (path.endsWith('/messages')) return { content: 'xin chào' };
       if (path.endsWith('/password')) return { password: 'password123' };
       if (path.endsWith('/rules')) return { name: 'Rule mới', keywords: ['a b'], answer: 'a' };
+      if (path.endsWith('/rules/generate')) return { text: 'Giờ mở cửa: 8h-20h' };
+      if (path.endsWith('/rules/bulk')) return { items: [{ name: 'Rule mới', keywords: ['a b'], answer: 'a' }] };
       return {};
     };
 
