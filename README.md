@@ -57,9 +57,10 @@ cp .env.example .env
 openssl rand -base64 32              # dán vào CREDENTIAL_KEY
 
 pnpm db:seed                      # workspace + bot + 5 rule mẫu (không tạo tài khoản)
-pnpm admin:build
-pnpm start:dev                    # tự áp dụng migration khi khởi động
+pnpm start:dev                    # build admin rồi chạy backend ở chế độ watch, tự áp dụng migration
 ```
+
+`pnpm start:dev` build lại admin mỗi lần chạy (backend tự build lại khi sửa code). Sửa code admin trong lúc đang chạy thì chạy lại lệnh, hoặc dùng `pnpm admin:dev` (http://localhost:5173/admin) để có hot reload. `pnpm start` build cả backend lẫn admin rồi chạy bản build.
 
 - Admin (quản lý tenant): http://localhost:3000/admin — lần đầu mở sẽ tự chuyển tới `/admin/setup` để tạo tài khoản đầu tiên
 - Khu workspace của khách hàng: http://localhost:3000/app — chủ shop đăng nhập bằng tài khoản được cấp

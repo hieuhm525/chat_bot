@@ -6,8 +6,8 @@
   "description": "Multi-channel customer support bot (Messenger/Zalo/WhatsApp) with NestJS",
   "scripts": {
     "build": "nest build",
-    "start": "node dist/main.js",
-    "start:dev": "nest start --watch",
+    "start": "pnpm build && pnpm admin:build && node dist/main.js",
+    "start:dev": "pnpm admin:build && nest start --watch",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
