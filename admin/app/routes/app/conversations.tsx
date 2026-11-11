@@ -1,4 +1,4 @@
-import { FormEvent, UIEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, UIEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowLeft, Bot, ChevronUp, Filter, Hand, Loader2, MessagesSquare, Search, Send, Undo2, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api';
@@ -164,6 +164,9 @@ function ReplierAvatar({ senderType }: { senderType: 'bot' | 'agent' }) {
  * Folds the latest page (newest 50) into the thread on screen: same id → take the fresh copy (status may have
  * changed), new id → append. Older messages loaded via "Tải tin cũ hơn" are kept.
  */
+/** Page size of GET /conversations/:id and /messages?before= (see conversations.service.ts). */
+const PAGE_SIZE = 50;
+
 function mergeMessages(current: Message[], latest: Message[]): Message[] {
   const fresh = new Map(latest.map((m) => [m.id, m]));
   const known = new Set(current.map((m) => m.id));
@@ -181,8 +184,14 @@ export function Conversations() {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'' | 'act' | 'send' | 'older'>('');
+  // False once the server returns a short page of older messages: the thread starts here.
+  const [hasOlder, setHasOlder] = useState(false);
   const loadingRef = useRef(false);
   const threadRef = useRef<HTMLDivElement>(null);
+  // Set before a setSelected() whose new messages should end up in view; consumed after the DOM updates.
+  const scrollToBottomRef = useRef(false);
+  // Distance from the bottom saved before prepending older messages, so the message being read stays put.
+  const keepFromBottomRef = useRef<number | null>(null);
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const selectedRef = useRef(selected);
@@ -206,8 +215,8 @@ export function Conversations() {
         // User switched threads or a send/load-older ran while this request was in flight: drop the stale result.
         if (!prev || prev.id !== selectedId || busyRef.current) return;
         const merged = mergeMessages(prev.messages, fresh.messages);
+        if (merged.length > prev.messages.length && nearBottom) scrollToBottomRef.current = true;
         setSelected({ ...fresh, messages: merged });
-        if (merged.length > prev.messages.length && nearBottom) requestAnimationFrame(() => el?.scrollTo({ top: el.scrollHeight }));
       } catch (e) {
         failures += 1;
         console.warn('Làm mới hội thoại thất bại', { conversationId: selectedId, attempt: failures, error: (e as Error).message });
@@ -236,9 +245,30 @@ export function Conversations() {
 
   const loadDetail = (id: string) =>
     api<Detail>(`/conversations/${id}`).then((row) => {
-      setSelected(row);
+      // Opening a thread, sending, takeover/release: show the newest message.
+      scrollToBottomRef.current = true;
+      const prev = selectedRef.current;
+      if (prev?.id === id) {
+        // Same thread (send/takeover/release): keep the older messages already loaded.
+        setSelected({ ...row, messages: mergeMessages(prev.messages, row.messages) });
+      } else {
+        setSelected(row);
+        setHasOlder(row.messages.length >= PAGE_SIZE);
+      }
       setDetail(null);
     });
+
+  useLayoutEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    if (keepFromBottomRef.current !== null) {
+      el.scrollTop = el.scrollHeight - keepFromBottomRef.current;
+      keepFromBottomRef.current = null;
+    } else if (scrollToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+    scrollToBottomRef.current = false;
+  }, [selected]);
 
   useEffect(() => {
     api<Options>('/conversations/options').then(setOptions).catch((e) => setError(e.message));
@@ -283,14 +313,24 @@ export function Conversations() {
     });
   };
 
-  const loadOlder = () =>
-    run('older', 'Không tải được tin cũ', async () => {
-      if (!selected?.messages.length) return;
+  const loadOlder = () => {
+    const current = selectedRef.current;
+    if (!current?.messages.length || busyRef.current) return;
+    return run('older', 'Không tải được tin cũ', async () => {
       const older = await api<Message[]>(
-        `/conversations/${selected.id}/messages?before=${encodeURIComponent(selected.messages[0].id)}`,
+        `/conversations/${current.id}/messages?before=${encodeURIComponent(current.messages[0].id)}`,
       );
-      setSelected({ ...selected, messages: [...older, ...selected.messages] });
+      const el = threadRef.current;
+      if (el) keepFromBottomRef.current = el.scrollHeight - el.scrollTop;
+      setHasOlder(older.length >= PAGE_SIZE);
+      setSelected((prev) => (prev?.id === current.id ? { ...prev, messages: [...older, ...prev.messages] } : prev));
     });
+  };
+
+  // Reaching the top of the thread loads the previous page, like the button does.
+  const onThreadScroll = (e: UIEvent<HTMLElement>) => {
+    if (hasOlder && e.currentTarget.scrollTop < 40) loadOlder();
+  };
 
   const onScroll = (e: UIEvent<HTMLElement>) => {
     const el = e.currentTarget;
@@ -306,7 +346,7 @@ export function Conversations() {
   useDocumentTitle(customerName ? `${customerName} · Hội thoại` : 'Hội thoại');
 
   return (
-    <div className="grid h-full md:h-screen md:grid-cols-[380px_1fr]">
+    <div className="grid h-full grid-rows-1 md:h-screen md:grid-cols-[380px_1fr]">
       <section className={cn('min-h-0 flex-col border-r bg-card md:flex', selected ? 'hidden' : 'flex')}>
         <div className="space-y-3 border-b p-4">
           <h1 className="text-lg font-semibold tracking-tight">Hội thoại</h1>
@@ -481,17 +521,25 @@ export function Conversations() {
               )}
             </header>
 
-            <div ref={threadRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-5 py-4">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="self-center text-muted-foreground"
-                disabled={busy === 'older'}
-                onClick={loadOlder}
-              >
-                {busy === 'older' ? <Loader2 className="animate-spin" /> : <ChevronUp />}
-                Tải tin cũ hơn
-              </Button>
+            <div
+              ref={threadRef}
+              onScroll={onThreadScroll}
+              className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-5 py-4"
+            >
+              {hasOlder ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="self-center text-muted-foreground"
+                  disabled={busy === 'older'}
+                  onClick={loadOlder}
+                >
+                  {busy === 'older' ? <Loader2 className="animate-spin" /> : <ChevronUp />}
+                  Tải tin cũ hơn
+                </Button>
+              ) : (
+                <p className="self-center py-1 text-xs text-muted-foreground">Đầu cuộc hội thoại</p>
+              )}
               {selected.messages.map((m) => {
                 const clickable = m.senderType === 'bot';
                 const failed = m.status === 'failed' || m.status === 'blocked_by_policy';
