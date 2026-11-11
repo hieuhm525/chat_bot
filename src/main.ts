@@ -5,11 +5,19 @@ import { Logger } from 'nestjs-pino';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { static as expressStatic } from 'express';
+import { setDefaultResultOrder } from 'node:dns';
 import { existsSync } from 'node:fs';
+import { setDefaultAutoSelectFamily } from 'node:net';
 import { join } from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { AppModule } from './app.module';
 import { DRIZZLE, Db } from './db/db.module';
+
+// Networks that advertise IPv6 without routing it make fetch() to LLM/Meta APIs
+// time out. Node's happy-eyeballs gives each address only 250 ms, so a slow IPv4
+// handshake gets abandoned for the dead IPv6 route; connect to IPv4 directly.
+setDefaultResultOrder('ipv4first');
+setDefaultAutoSelectFamily(false);
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });

@@ -15,7 +15,7 @@ export type Db = NodePgDatabase<typeof schema>;
     {
       provide: PG_POOL,
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => new Pool({ connectionString: config.getOrThrow<string>('DATABASE_URL') }),
+      useFactory: (config: ConfigService) => new Pool({ connectionString: config.getOrThrow<string>('DATABASE_URL'), connectionTimeoutMillis: 10_000 }),
     },
     {
       provide: DRIZZLE,
