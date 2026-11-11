@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 export function AuthShell(props: { title: ReactNode; description?: ReactNode; children?: ReactNode; footer?: ReactNode }) {
+  useDocumentTitle(typeof props.title === 'string' ? props.title : null);
   return (
     <div className="relative grid min-h-screen place-items-center overflow-hidden bg-background px-4 py-12">
       <div

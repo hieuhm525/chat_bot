@@ -7,6 +7,7 @@ import { AuthShell } from '@/components/auth-shell';
 import { Field, Loading, Notices } from '@/components/page';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/password-input';
 
 export interface SignupStatus {
   enabled: boolean;
@@ -81,22 +82,20 @@ export function Register({ onLogin }: { onLogin: (user: User) => void }) {
           />
         </Field>
         <Field label="Mật khẩu" htmlFor="password" hint="Tối thiểu 6 ký tự.">
-          <Input
+          <PasswordInput
             id="password"
             value={form.password}
             onChange={set('password')}
-            type="password"
             autoComplete="new-password"
             required
             minLength={6}
           />
         </Field>
         <Field label="Nhập lại mật khẩu" htmlFor="confirmPassword">
-          <Input
+          <PasswordInput
             id="confirmPassword"
             value={form.confirmPassword}
             onChange={set('confirmPassword')}
-            type="password"
             autoComplete="new-password"
             required
             minLength={6}

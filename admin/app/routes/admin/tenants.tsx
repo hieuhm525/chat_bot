@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { KeyRound, Loader2, Lock, LockOpen, Pencil, Plus } from 'lucide-react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+import { KeyRound, Loader2, Lock, LockOpen, Pencil, Plus, Search } from 'lucide-react';
 import { api } from '../../api';
 import { useDialogs } from '@/components/dialogs';
 import { Field, Notices, Page, PageHeader, TableCard } from '@/components/page';
@@ -7,6 +7,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/password-input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Pager } from '@/components/pager';
+import { useDebounced } from '@/hooks/use-debounced';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 interface Tenant {
@@ -54,8 +59,24 @@ function toDateInput(value: string | null) {
   return value ? new Date(value).toISOString().slice(0, 10) : '';
 }
 
+interface TenantPage {
+  items: Tenant[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+const PAGE_SIZE = 20;
+
 export function Tenants() {
-  const [items, setItems] = useState<Tenant[]>([]);
+  const [data, setData] = useState<TenantPage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [status, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const q = useDebounced(search.trim(), 300);
+  const items = data?.items ?? [];
+  const filtered = Boolean(q || status);
   const [form, setForm] = useState(empty);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -64,10 +85,33 @@ export function Tenants() {
   const [notice, setNotice] = useState('');
   const { confirm, askPassword } = useDialogs();
 
-  const load = () => api<Tenant[]>('/tenants').then(setItems).catch((e) => setError(e.message));
+  const requestSeq = useRef(0);
+  const load = async () => {
+    const seq = ++requestSeq.current;
+    setLoading(true);
+    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+    if (q) params.set('q', q);
+    if (status) params.set('status', status);
+    try {
+      const res = await api<TenantPage>(`/tenants?${params}`);
+      if (seq !== requestSeq.current) return; // a newer query is already in flight
+      // Deleting/filtering can leave the current page past the end; step back to the last page.
+      const last = Math.max(1, Math.ceil(res.total / PAGE_SIZE));
+      if (page > last) {
+        setPage(last);
+        return;
+      }
+      setData(res);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Không tải được danh sách tenant.');
+    } finally {
+      if (seq === requestSeq.current) setLoading(false);
+    }
+  };
+  // Reload exactly when the query changes; filter handlers reset the page in the same render.
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+  }, [page, q, status]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -176,6 +220,38 @@ export function Tenants() {
       />
       <Notices error={error} notice={notice} />
 
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:w-72">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            placeholder="Tìm tên shop hoặc tên đăng nhập"
+            aria-label="Tìm tenant"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            className="pl-8"
+            maxLength={100}
+          />
+        </div>
+        <div className="w-full sm:w-44">
+          <NativeSelect aria-label="Lọc theo trạng thái" value={status} onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setPage(1);
+          }}>
+            <NativeSelectOption value="">Mọi trạng thái</NativeSelectOption>
+            {Object.entries(statusLabel).map(([value, label]) => (
+              <NativeSelectOption key={value} value={value}>
+                {label}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
+        {loading && data && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Đang tải" />}
+      </div>
+
       <TableCard>
         <Table>
           <TableHeader>
@@ -248,7 +324,36 @@ export function Tenants() {
                 </TableCell>
               </TableRow>
             ))}
-            {!items.length && (
+            {!data &&
+              loading &&
+              Array.from({ length: 3 }, (_, i) => (
+                <TableRow key={`sk-${i}`}>
+                  <TableCell colSpan={8}>
+                    <Skeleton className="h-8 w-full" />
+                  </TableCell>
+                </TableRow>
+              ))}
+            {data && !items.length && filtered && (
+              <TableRow>
+                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                  <div className="space-y-3">
+                    <p>Không có tenant nào khớp bộ lọc.</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSearch('');
+                        setStatusFilter('');
+                        setPage(1);
+                      }}
+                    >
+                      Xoá bộ lọc
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            )}
+            {data && !items.length && !filtered && (
               <TableRow>
                 <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
                   <div className="space-y-3">
@@ -264,6 +369,9 @@ export function Tenants() {
           </TableBody>
         </Table>
       </TableCard>
+      {data && data.total > 0 && (
+        <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} disabled={loading} />
+      )}
 
       <Dialog open={open} onOpenChange={(v) => !v && !saving && setOpen(false)}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
@@ -301,11 +409,10 @@ export function Tenants() {
                   />
                 </Field>
                 <Field label="Mật khẩu" htmlFor="t-password">
-                  <Input
+                  <PasswordInput
                     id="t-password"
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    type="password"
                     required
                     minLength={6}
                     autoComplete="new-password"

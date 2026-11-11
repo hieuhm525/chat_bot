@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/password-input';
 import { Label } from '@/components/ui/label';
 
 interface ConfirmOptions {
@@ -120,9 +120,8 @@ export function DialogsProvider({ children }: { children: ReactNode }) {
             </DialogHeader>
             <div className="grid gap-2">
               <Label htmlFor="dialog-password">Mật khẩu mới</Label>
-              <Input
+              <PasswordInput
                 id="dialog-password"
-                type="password"
                 autoComplete="new-password"
                 autoFocus
                 required

@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { cn } from '@/lib/utils';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 
 interface ConversationSummary {
   id: string;
@@ -302,6 +303,7 @@ export function Conversations() {
     setFilters({ ...filters, [key]: e.target.value });
 
   const customerName = selected ? (selected.customer.displayName ?? selected.customer.externalUserId) : '';
+  useDocumentTitle(customerName ? `${customerName} · Hội thoại` : 'Hội thoại');
 
   return (
     <div className="grid h-full md:h-screen md:grid-cols-[380px_1fr]">

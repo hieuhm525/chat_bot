@@ -6,6 +6,7 @@ import { AuthShell } from '@/components/auth-shell';
 import { Field, Notices } from '@/components/page';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/password-input';
 
 export interface SetupStatus {
   needsSetup: boolean;
@@ -79,11 +80,10 @@ export function Setup({ status, onDone }: { status: SetupStatus; onDone: (user: 
         </Field>
 
         <Field label="Mật khẩu" htmlFor="password" hint="Tối thiểu 6 ký tự.">
-          <Input
+          <PasswordInput
             id="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            type="password"
             autoComplete="new-password"
             required
             minLength={6}
@@ -91,11 +91,10 @@ export function Setup({ status, onDone }: { status: SetupStatus; onDone: (user: 
         </Field>
 
         <Field label="Nhập lại mật khẩu" htmlFor="confirmPassword">
-          <Input
+          <PasswordInput
             id="confirmPassword"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            type="password"
             autoComplete="new-password"
             required
             minLength={6}
@@ -104,11 +103,10 @@ export function Setup({ status, onDone }: { status: SetupStatus; onDone: (user: 
 
         {status.tokenRequired && (
           <Field label="Setup token" htmlFor="setupToken" hint="Lấy từ SETUP_TOKEN trong .env.">
-            <Input
+            <PasswordInput
               id="setupToken"
               value={setupToken}
               onChange={(e) => setSetupToken(e.target.value)}
-              type="password"
               required
             />
           </Field>

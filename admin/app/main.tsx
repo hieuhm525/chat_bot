@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { DialogsProvider } from '@/components/dialogs';
+import { RouteErrorBoundary } from '@/components/error-pages';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import '@fontsource/be-vietnam-pro/400.css';
@@ -18,7 +19,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BrowserRouter basename={basename}>
       <TooltipProvider>
         <DialogsProvider>
-          <App />
+          {/* Last line of defence for errors outside the routed screens (layout, boot). */}
+          <RouteErrorBoundary>
+            <App />
+          </RouteErrorBoundary>
         </DialogsProvider>
         <Toaster richColors position="top-right" />
       </TooltipProvider>

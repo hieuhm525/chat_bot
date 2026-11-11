@@ -3,12 +3,21 @@ import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 
 export function Page({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn('mx-auto w-full max-w-6xl space-y-6 p-6 lg:p-8', className)}>{children}</div>;
 }
 
-export function PageHeader(props: { title: ReactNode; description?: ReactNode; back?: ReactNode; actions?: ReactNode }) {
+export function PageHeader(props: {
+  title: ReactNode;
+  /** Browser tab title; defaults to `title` when it is plain text. */
+  docTitle?: string;
+  description?: ReactNode;
+  back?: ReactNode;
+  actions?: ReactNode;
+}) {
+  useDocumentTitle(props.docTitle ?? (typeof props.title === 'string' ? props.title : null));
   return (
     <div className="space-y-1">
       {props.back && <div className="text-sm">{props.back}</div>}

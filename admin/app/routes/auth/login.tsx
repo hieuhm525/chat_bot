@@ -8,6 +8,7 @@ import { AuthShell } from '@/components/auth-shell';
 import { Field, Notices } from '@/components/page';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/password-input';
 
 export function Login({ onLogin }: { onLogin: (user: User) => void }) {
   const [username, setUsername] = useState('');
@@ -66,11 +67,10 @@ export function Login({ onLogin }: { onLogin: (user: User) => void }) {
         </Field>
 
         <Field label="Mật khẩu" htmlFor="password">
-          <Input
+          <PasswordInput
             id="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            type="password"
             autoComplete="current-password"
             required
             minLength={6}
