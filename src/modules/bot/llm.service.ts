@@ -28,6 +28,25 @@ export interface LlmResult {
   latencyMs: number;
 }
 
+/** Per-minute limits some providers (Groq, OpenAI) send as `x-ratelimit-*` headers. */
+export interface RateLimit {
+  limitTokens?: number;
+  remainingTokens?: number;
+  limitRequests?: number;
+  remainingRequests?: number;
+}
+
+export interface TestResult {
+  reply: string;
+  model: string;
+  tokensIn?: number;
+  tokensOut?: number;
+  latencyMs: number;
+  rateLimit?: RateLimit;
+  /** OpenRouter only, in USD. `limit`/`remaining` are null for keys without a cap. */
+  credits?: { usage: number | null; limit: number | null; remaining: number | null };
+}
+
 const CACHE_MS = 30_000;
 
 /**
@@ -104,13 +123,56 @@ export class LlmService implements OnModuleInit {
   }
 
   /** One short completion against a single provider, for the admin test button. */
-  async testConnection(provider: LlmProvider): Promise<string> {
+  async testConnection(provider: LlmProvider): Promise<TestResult> {
     if (!provider.apiKey && !isLocal(provider.baseUrl)) throw new Error('Provider chưa có API key');
+    const startedAt = Date.now();
     const result = await this.call(provider, [{ role: 'user', content: 'Trả lời đúng một từ: ok' }]);
-    return result.text;
+    return {
+      reply: result.text,
+      model: result.model,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      latencyMs: Date.now() - startedAt,
+      rateLimit: result.rateLimit,
+      credits: await this.credits(provider),
+    };
   }
 
-  private async call(provider: LlmProvider, messages: ChatMessage[]): Promise<Omit<LlmResult, 'latencyMs'>> {
+  /** Model ids from the OpenAI-compatible `GET /models` (Gemini prefixes ids with `models/`). */
+  async listModels(provider: Pick<LlmProvider, 'baseUrl' | 'apiKey'>): Promise<string[]> {
+    const res = await fetch(`${provider.baseUrl.replace(/\/$/, '')}/models`, {
+      headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
+      signal: AbortSignal.timeout(this.config.getOrThrow<number>('LLM_TIMEOUT_MS')),
+    });
+    if (!res.ok) throw new Error(await httpError(res));
+    const body = (await res.json()) as any;
+    const ids: string[] = (Array.isArray(body?.data) ? body.data : [])
+      .map((m: any) => (typeof m?.id === 'string' ? m.id.replace(/^models\//, '') : ''))
+      .filter(Boolean);
+    return [...new Set(ids)].sort();
+  }
+
+  /** OpenRouter is the only common provider that reports remaining credit for a key. */
+  private async credits(provider: LlmProvider): Promise<TestResult['credits']> {
+    if (!/openrouter\.ai/.test(provider.baseUrl) || !provider.apiKey) return undefined;
+    try {
+      const res = await fetch(`${provider.baseUrl.replace(/\/$/, '')}/key`, {
+        headers: { Authorization: `Bearer ${provider.apiKey}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) return undefined;
+      const data = ((await res.json()) as any)?.data ?? {};
+      return { usage: data.usage ?? null, limit: data.limit ?? null, remaining: data.limit_remaining ?? null };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async call(
+    provider: LlmProvider,
+    messages: ChatMessage[],
+  ): Promise<Omit<LlmResult, 'latencyMs'> & { rateLimit?: RateLimit }> {
+    const maxTokens = this.config.getOrThrow<number>('LLM_MAX_TOKENS');
     const res = await fetch(`${provider.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -121,20 +183,28 @@ export class LlmService implements OnModuleInit {
         model: provider.model,
         messages,
         temperature: 0.3,
-        max_tokens: this.config.getOrThrow<number>('LLM_MAX_TOKENS'),
+        max_tokens: maxTokens,
+        // Gemini 3 always thinks and the thoughts count against max_tokens; keep them short.
+        ...(/generativelanguage\.googleapis\.com/.test(provider.baseUrl) ? { reasoning_effort: 'low' } : {}),
       }),
       signal: AbortSignal.timeout(this.config.getOrThrow<number>('LLM_TIMEOUT_MS')),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(await httpError(res));
     const body = (await res.json()) as any;
-    const content = body?.choices?.[0]?.message?.content;
+    const choice = body?.choices?.[0];
+    const content = choice?.message?.content;
     if (typeof content !== 'string') throw new Error('Phản hồi LLM không hợp lệ');
+    // A cut-off answer (often half a draft) must never reach the customer.
+    if (choice?.finish_reason === 'length') {
+      throw new Error(`Câu trả lời bị cắt vì vượt giới hạn ${maxTokens} token`);
+    }
     return {
       text: content,
       provider: provider.name,
       model: typeof body?.model === 'string' ? body.model : provider.model,
       tokensIn: body?.usage?.prompt_tokens,
       tokensOut: body?.usage?.completion_tokens,
+      rateLimit: readRateLimit(res.headers),
     };
   }
 
@@ -172,6 +242,28 @@ export class LlmService implements OnModuleInit {
       });
     if (values.length) await this.db.insert(llmProviders).values(values);
   }
+}
+
+/** `HTTP 400: API key not valid…` — providers put the reason in `error.message`. */
+async function httpError(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => null)) as any;
+  const raw = Array.isArray(body) ? body[0] : body;
+  const message = raw?.error?.message ?? raw?.message;
+  return typeof message === 'string' ? `HTTP ${res.status}: ${message.slice(0, 500)}` : `HTTP ${res.status}`;
+}
+
+function readRateLimit(headers: Headers): RateLimit | undefined {
+  const num = (name: string) => {
+    const value = Number(headers.get(name));
+    return headers.has(name) && Number.isFinite(value) ? value : undefined;
+  };
+  const rateLimit: RateLimit = {
+    limitTokens: num('x-ratelimit-limit-tokens'),
+    remainingTokens: num('x-ratelimit-remaining-tokens'),
+    limitRequests: num('x-ratelimit-limit-requests'),
+    remainingRequests: num('x-ratelimit-remaining-requests'),
+  };
+  return Object.values(rateLimit).some((v) => v !== undefined) ? rateLimit : undefined;
 }
 
 function isLocal(baseUrl: string) {

@@ -506,7 +506,7 @@ describe('bv-agent-msg e2e', () => {
     const badTest = await adminAgent.post(`/api/v1/llm-providers/${bad.body.id}/test`).expect(201);
     expect(badTest.body.ok).toBe(false);
     const goodTest = await adminAgent.post(`/api/v1/llm-providers/${good.body.id}/test`).expect(201);
-    expect(goodTest.body).toEqual({ ok: true, detail: 'Kết nối OK' });
+    expect(goodTest.body).toMatchObject({ ok: true, detail: 'Kết nối OK', result: { tokensIn: 5, tokensOut: 3 } });
 
     const listed = await adminAgent.get('/api/v1/llm-providers').expect(200);
     expect(listed.body).toHaveLength(2);
@@ -630,6 +630,9 @@ describe('bv-agent-msg e2e', () => {
       '/api/v1/llm-providers': ['admin'],
       '/api/v1/llm-providers/:id': ['admin'],
       '/api/v1/llm-providers/:id/test': ['admin'],
+      '/api/v1/llm-providers/usage': ['admin'],
+      '/api/v1/llm-providers/models': ['admin'],
+      '/api/v1/llm-providers/test': ['admin'],
       '/api/v1/bots': ['owner'],
       '/api/v1/bots/:botId': ['owner'],
       '/api/v1/bots/:botId/rules': ['owner'],

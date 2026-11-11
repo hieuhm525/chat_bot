@@ -1,11 +1,19 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadGatewayException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { DRIZZLE, Db } from '../../db/db.module';
-import { llmProviders } from '../../db/schema';
+import { llmProviders, messages } from '../../db/schema';
 import { decryptCredential, encryptCredential } from '../../common/crypto';
 import { uuidv7 } from '../../common/uuidv7';
-import { LlmService } from '../bot/llm.service';
+import { LlmService, TestResult } from '../bot/llm.service';
+
+/** Unsaved form values; `id` lets the form reuse the stored key when the key field is blank. */
+export interface DraftInput {
+  id?: string;
+  baseUrl: string;
+  model?: string;
+  apiKey?: string;
+}
 
 export interface ProviderInput {
   name?: string;
@@ -83,34 +91,83 @@ export class LlmProvidersService {
 
   async test(id: string) {
     const row = await this.getRow(id);
-    let ok = false;
-    let detail: string;
+    let result: TestResult | undefined;
+    let error: string | undefined;
     try {
-      const apiKey = row.apiKeyEnc
-        ? decryptCredential(row.apiKeyEnc, row.id, this.config.getOrThrow<string>('CREDENTIAL_KEY'))
-        : undefined;
-      await this.llm.testConnection({
+      result = await this.llm.testConnection({
         id: row.id,
         name: row.name,
         baseUrl: row.baseUrl,
         model: row.model,
-        apiKey,
+        apiKey: this.decrypt(row),
       });
-      ok = true;
-      detail = 'Kết nối OK';
     } catch (err) {
-      detail = err instanceof Error ? err.message : String(err);
+      error = describe(err);
     }
     await this.db
       .update(llmProviders)
       .set({
         lastCheckAt: new Date(),
-        lastCheckOk: ok,
-        lastError: ok ? null : detail.slice(0, 300),
+        lastCheckOk: !error,
+        lastError: error ? error.slice(0, 500) : null,
         updatedAt: new Date(),
       })
       .where(eq(llmProviders.id, id));
-    return { ok, detail };
+    return { ok: !error, detail: error ?? 'Kết nối OK', result };
+  }
+
+  /** Test values typed in the form before saving them. */
+  async testDraft(input: DraftInput) {
+    try {
+      const result = await this.llm.testConnection({
+        id: input.id ?? 'draft',
+        name: 'draft',
+        baseUrl: input.baseUrl,
+        model: input.model ?? '',
+        apiKey: await this.draftKey(input),
+      });
+      return { ok: true, detail: 'Kết nối OK', result };
+    } catch (err) {
+      return { ok: false, detail: describe(err) };
+    }
+  }
+
+  async models(input: DraftInput) {
+    const apiKey = await this.draftKey(input);
+    try {
+      return { models: await this.llm.listModels({ baseUrl: input.baseUrl, apiKey }) };
+    } catch (err) {
+      throw new BadGatewayException(describe(err));
+    }
+  }
+
+  /** Tokens spent per provider name, from bot answers stored in `messages.metadata`. */
+  async usage() {
+    const rows = await this.db
+      .select({
+        provider: sql<string>`${messages.metadata}->>'provider'`,
+        answers: sql<number>`count(*)::int`,
+        tokensIn: sql<number>`coalesce(sum((${messages.metadata}->>'tokensIn')::int), 0)::int`,
+        tokensOut: sql<number>`coalesce(sum((${messages.metadata}->>'tokensOut')::int), 0)::int`,
+        tokensToday: sql<number>`coalesce(sum((coalesce((${messages.metadata}->>'tokensIn')::int, 0) + coalesce((${messages.metadata}->>'tokensOut')::int, 0))) filter (where ${messages.createdAt} >= date_trunc('day', now())), 0)::int`,
+      })
+      .from(messages)
+      .where(sql`${messages.metadata}->>'source' = 'llm' and ${messages.metadata} ? 'provider'`)
+      .groupBy(sql`${messages.metadata}->>'provider'`);
+    return rows;
+  }
+
+  private async draftKey(input: DraftInput) {
+    const typed = input.apiKey?.trim();
+    if (typed) return typed;
+    if (!input.id) return undefined;
+    return this.decrypt(await this.getRow(input.id));
+  }
+
+  private decrypt(row: typeof llmProviders.$inferSelect) {
+    return row.apiKeyEnc
+      ? decryptCredential(row.apiKeyEnc, row.id, this.config.getOrThrow<string>('CREDENTIAL_KEY'))
+      : undefined;
   }
 
   private encrypt(apiKey: string, id: string) {
@@ -155,4 +212,13 @@ export class LlmProvidersService {
     if (!row) throw new NotFoundException('Không tìm thấy provider');
     return row;
   }
+}
+
+/** `fetch failed` hides the real reason (DNS, TLS, refused) in `cause`. */
+function describe(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  if (err.name === 'TimeoutError') return 'Hết thời gian chờ provider phản hồi';
+  const cause = (err as { cause?: { code?: string; message?: string } }).cause;
+  const reason = cause?.code ?? cause?.message;
+  return reason && err.message === 'fetch failed' ? `Không kết nối được provider (${reason})` : err.message;
 }

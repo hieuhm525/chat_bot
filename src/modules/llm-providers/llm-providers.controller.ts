@@ -8,10 +8,10 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { AuthUser, CurrentUser } from '../../common/current-user.decorator';
 import { Roles } from '../../common/roles.decorator';
-import { LlmProvidersService, ProviderInput } from './llm-providers.service';
+import { DraftInput, LlmProvidersService, ProviderInput } from './llm-providers.service';
 
 class CreateProviderDto {
   @IsString() @MinLength(1) @MaxLength(100) name!: string;
@@ -47,6 +47,17 @@ class UpdateProviderDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
+class DraftDto {
+  @IsOptional() @IsUUID() id?: string;
+
+  @IsString() @Matches(/^https?:\/\/\S+$/, { message: 'baseUrl phải bắt đầu bằng http:// hoặc https://' })
+  baseUrl!: string;
+
+  @IsOptional() @IsString() @MaxLength(200) model?: string;
+
+  @IsOptional() @IsString() @MaxLength(500) apiKey?: string;
+}
+
 @Roles('admin')
 @Controller('llm-providers')
 export class LlmProvidersController {
@@ -55,6 +66,21 @@ export class LlmProvidersController {
   @Get()
   list(@CurrentUser() user: AuthUser) {
     return this.providers.list();
+  }
+
+  @Get('usage')
+  usage() {
+    return this.providers.usage();
+  }
+
+  @Post('models')
+  models(@Body() dto: DraftDto) {
+    return this.providers.models(dto as DraftInput);
+  }
+
+  @Post('test')
+  testDraft(@Body() dto: DraftDto) {
+    return this.providers.testDraft(dto as DraftInput);
   }
 
   @Post()

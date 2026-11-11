@@ -42,7 +42,7 @@ export class Env {
 
   @Type(() => Number)
   @IsInt()
-  LLM_MAX_TOKENS = 300;
+  LLM_MAX_TOKENS = 1024;
 
   @IsOptional()
   @IsString()
