@@ -1,13 +1,18 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, ne } from 'drizzle-orm';
 import { Inject } from '@nestjs/common';
 import { DRIZZLE, Db } from '../../db/db.module';
 import { sessions, users, workspaces } from '../../db/schema';
 import { AuthUser } from '../../common/current-user.decorator';
 import { randomToken, sha256Hex } from '../../common/crypto';
 import { tenantBlocked } from '../../common/tenant-status';
+import { AuditService } from '../audit/audit.service';
+
+/** At least 8 characters with both letters and digits. Mirrored in admin/app/routes/shared/account.tsx. */
+export const PASSWORD_RULE = /^(?=.*[A-Za-zÀ-ỹ])(?=.*\d).{8,128}$/;
+export const PASSWORD_RULE_MESSAGE = 'Mật khẩu mới cần 8-128 ký tự, có cả chữ và số';
 
 const SESSION_DAYS = 7;
 
@@ -18,6 +23,7 @@ export class AuthService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
     private readonly config: ConfigService,
+    private readonly audit: AuditService,
   ) {
     this.cookieName = config.getOrThrow<string>('NODE_ENV') === 'production' ? '__Host-bv_session' : 'bv_session';
   }
@@ -42,6 +48,10 @@ export class AuthService {
       .limit(1);
     const user = row?.user;
     if (!user || !(await argon2.verify(user.passwordHash, password))) {
+      await this.audit.record(
+        { user: null, ip, username: username.trim().toLowerCase() },
+        { action: 'auth.login_failed', workspaceId: user?.workspaceId ?? null, metadata: { reason: user ? 'wrong_password' : 'unknown_user' } },
+      );
       throw new UnauthorizedException('Tên đăng nhập hoặc mật khẩu không đúng');
     }
     if (user.disabledAt) throw new ForbiddenException('Tài khoản đã bị vô hiệu hoá');
@@ -57,7 +67,48 @@ export class AuthService {
       ip: ip?.slice(0, 64),
       userAgent: userAgent?.slice(0, 256),
     });
-    return { token, expiresAt, user: this.toAuthUser(user) };
+    const authUser = this.toAuthUser(user);
+    await this.audit.record({ user: authUser, ip }, { action: 'auth.login', metadata: { userAgent: userAgent?.slice(0, 256) } });
+    return { token, expiresAt, user: authUser };
+  }
+
+  /** Verifies the current password, stores the new one and ends every other session of this user. */
+  async changePassword(user: AuthUser, currentToken: string, currentPassword: string, newPassword: string, ip?: string) {
+    const [row] = await this.db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    if (!row) throw new UnauthorizedException('Phiên đăng nhập không hợp lệ');
+    if (!(await argon2.verify(row.passwordHash, currentPassword))) {
+      throw new BadRequestException({
+        message: 'Mật khẩu hiện tại không đúng',
+        errors: [{ field: 'currentPassword', message: 'Mật khẩu hiện tại không đúng' }],
+      });
+    }
+    if (currentPassword === newPassword) {
+      throw new BadRequestException({
+        message: 'Mật khẩu mới phải khác mật khẩu hiện tại',
+        errors: [{ field: 'newPassword', message: 'Mật khẩu mới phải khác mật khẩu hiện tại' }],
+      });
+    }
+    const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+    const revoked = await this.db.transaction(async (tx) => {
+      await tx.update(users).set({ passwordHash }).where(eq(users.id, user.id));
+      return this.deleteOtherSessions(tx, user.id, currentToken);
+    });
+    await this.audit.record({ user, ip }, { action: 'auth.password_changed', metadata: { revokedSessions: revoked } });
+    return { ok: true, revokedSessions: revoked };
+  }
+
+  async logoutOthers(user: AuthUser, currentToken: string, ip?: string) {
+    const revoked = await this.deleteOtherSessions(this.db, user.id, currentToken);
+    await this.audit.record({ user, ip }, { action: 'auth.sessions_revoked', metadata: { revokedSessions: revoked } });
+    return { ok: true, revokedSessions: revoked };
+  }
+
+  private async deleteOtherSessions(db: Pick<Db, 'delete'>, userId: string, currentToken: string) {
+    const deleted = await db
+      .delete(sessions)
+      .where(and(eq(sessions.userId, userId), ne(sessions.tokenHash, sha256Hex(currentToken))))
+      .returning({ id: sessions.id });
+    return deleted.length;
   }
 
   async logout(token?: string) {

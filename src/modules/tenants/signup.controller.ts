@@ -51,7 +51,7 @@ export class SignupController {
       password: dto.password,
       plan: 'trial',
       expiresAt: new Date(Date.now() + days * 86_400_000).toISOString(),
-    });
+    }, { user: null, ip: req.ip }, 'signup');
     const result = await this.auth.login(dto.username, dto.password, req.ip, req.headers['user-agent']);
     res.cookie(this.auth.cookieName, result.token, this.auth.cookieOptions());
     return { user: result.user, expiresAt: result.expiresAt };

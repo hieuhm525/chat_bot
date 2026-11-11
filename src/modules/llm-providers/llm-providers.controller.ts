@@ -11,6 +11,7 @@ import {
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { AuthUser, CurrentUser } from '../../common/current-user.decorator';
 import { Roles } from '../../common/roles.decorator';
+import { ClientIp } from '../../common/client-ip.decorator';
 import { DraftInput, LlmProvidersService, ProviderInput } from './llm-providers.service';
 
 class CreateProviderDto {
@@ -84,8 +85,8 @@ export class LlmProvidersController {
   }
 
   @Post()
-  create(@CurrentUser() user: AuthUser, @Body() dto: CreateProviderDto) {
-    return this.providers.create(dto as ProviderInput);
+  create(@CurrentUser() user: AuthUser, @Body() dto: CreateProviderDto, @ClientIp() ip?: string) {
+    return this.providers.create(dto as ProviderInput, { user, ip });
   }
 
   @Patch(':id')
@@ -93,13 +94,14 @@ export class LlmProvidersController {
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateProviderDto,
+    @ClientIp() ip?: string,
   ) {
-    return this.providers.update(id, dto as ProviderInput);
+    return this.providers.update(id, dto as ProviderInput, { user, ip });
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.providers.remove(id);
+  remove(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @ClientIp() ip?: string) {
+    return this.providers.remove(id, { user, ip });
   }
 
   @Post(':id/test')

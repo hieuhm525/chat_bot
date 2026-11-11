@@ -14,6 +14,7 @@ import { MessagingModule } from './modules/messaging/messaging.module';
 import { SetupModule } from './modules/setup/setup.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { LlmProvidersModule } from './modules/llm-providers/llm-providers.module';
+import { AuditModule } from './modules/audit/audit.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { LlmProvidersModule } from './modules/llm-providers/llm-providers.module
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     DbModule,
+    AuditModule,
     AuthModule,
     ChannelsModule,
     BotModule,

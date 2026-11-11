@@ -286,3 +286,28 @@ export const botRules = pgTable(
     index('bot_rules_bot_priority_idx').on(t.botId, t.priority),
   ],
 );
+
+/**
+ * Who did what to which object. Actor and target labels are snapshots so the
+ * history still reads correctly after a user or tenant is renamed or removed.
+ */
+export const auditLogs = pgTable(
+  'audit_logs',
+  {
+    id: uuid('id').primaryKey().default(sql`uuidv7()`),
+    actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+    actorUsername: text('actor_username'),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    action: text('action').notNull(),
+    targetType: text('target_type'),
+    targetId: text('target_id'),
+    targetLabel: text('target_label'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    ip: text('ip'),
+    createdAt,
+  },
+  (t) => [
+    index('audit_logs_created_idx').on(t.createdAt),
+    index('audit_logs_action_created_idx').on(t.action, t.createdAt),
+  ],
+);

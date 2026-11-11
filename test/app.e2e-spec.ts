@@ -11,9 +11,9 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import { AppModule } from '../src/app.module';
 import { DRIZZLE, PG_POOL } from '../src/db/db.module';
 import { Db } from '../src/db/db.module';
-import { botRules, bots, channels, conversations, customers, llmProviders, messages, outbox, users, webhookEvents, workspaces } from '../src/db/schema';
+import { auditLogs, botRules, bots, channels, sessions, conversations, customers, llmProviders, messages, outbox, users, webhookEvents, workspaces } from '../src/db/schema';
 import { OutboxWorker } from '../src/modules/messaging/outbox.worker';
-import { decryptCredential } from '../src/common/crypto';
+import { decryptCredential, randomToken, sha256Hex } from '../src/common/crypto';
 import { DEFAULT_SYSTEM_PROMPT } from '../src/common/bot-defaults';
 
 const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5433/postgres';
@@ -695,6 +695,9 @@ describe('bv-agent-msg e2e', () => {
       '/api/v1/auth/login': 'public',
       '/api/v1/auth/logout': ['admin', 'owner'],
       '/api/v1/auth/me': ['admin', 'owner'],
+      '/api/v1/auth/change-password': ['admin', 'owner'],
+      '/api/v1/auth/logout-others': ['admin', 'owner'],
+      '/api/v1/audit-logs': ['admin'],
       '/api/v1/setup/status': 'public',
       '/api/v1/setup': 'public',
       '/api/v1/signup/status': 'public',
@@ -761,7 +764,7 @@ describe('bv-agent-msg e2e', () => {
 
     for (const route of routes) {
       // Executing logout would end the sessions the remaining tests still need.
-      if (route.path === '/api/v1/auth/logout') continue;
+      if (route.path === '/api/v1/auth/logout' || route.path === '/api/v1/auth/logout-others') continue;
       const expected = roleMap[route.path];
       if (expected === 'public') continue;
       const url = route.path.replace(':botId', fakeId).replace(':id', fakeId);
@@ -783,12 +786,25 @@ describe('bv-agent-msg e2e', () => {
 
   it('lists tenants once and redirects the old /customers route', async () => {
     const [extraBot] = await db.insert(bots).values({ workspaceId, name: 'Bot 2' }).returning();
-    const list = await adminAgent.get('/api/v1/tenants').expect(200);
-    const matches = list.body.filter((t: { id: string }) => t.id === workspaceId);
+    const list = await adminAgent.get('/api/v1/tenants?pageSize=100').expect(200);
+    const matches = list.body.items.filter((t: { id: string }) => t.id === workspaceId);
     expect(matches).toHaveLength(1);
     expect(matches[0]).toMatchObject({ name: 'Shop 1', username: 'owner', status: 'trial', plan: 'trial', bots: 2 });
+    expect(list.body).toMatchObject({ page: 1, pageSize: 100, total: list.body.items.length });
     const [platform] = await db.select().from(workspaces).where(eq(workspaces.isPlatform, true));
-    expect(list.body.some((t: { id: string }) => t.id === platform.id)).toBe(false);
+    expect(list.body.items.some((t: { id: string }) => t.id === platform.id)).toBe(false);
+
+    // Search matches the owner username, status filters, and pages are bounded.
+    const byOwner = await adminAgent.get('/api/v1/tenants?q=OWNER').expect(200);
+    expect(byOwner.body.items.map((t: { id: string }) => t.id)).toContain(workspaceId);
+    const none = await adminAgent.get('/api/v1/tenants?q=khong-ton-tai-%25').expect(200);
+    expect(none.body).toMatchObject({ items: [], total: 0 });
+    const suspended = await adminAgent.get('/api/v1/tenants?status=suspended').expect(200);
+    expect(suspended.body.items.some((t: { id: string }) => t.id === workspaceId)).toBe(false);
+    const paged = await adminAgent.get('/api/v1/tenants?pageSize=1&page=1').expect(200);
+    expect(paged.body.items).toHaveLength(1);
+    await adminAgent.get('/api/v1/tenants?status=bogus').expect(400);
+    await adminAgent.get('/api/v1/tenants?pageSize=500').expect(400);
 
     const redirect = await request(app.getHttpServer()).get('/api/v1/customers').expect(308);
     expect(redirect.headers.location).toBe('/api/v1/tenants');
@@ -1413,6 +1429,77 @@ describe('bv-agent-msg e2e', () => {
       .expect(200);
   });
 
+  it('changes the password, keeps the current session and ends the others', async () => {
+    // Login is rate limited per IP across the whole suite, so extra sessions are inserted directly.
+    const [pwUser] = await db
+      .insert(users)
+      .values({ workspaceId, username: 'pwuser', passwordHash: await argon2.hash('oldpass123', { type: argon2.argon2id }) })
+      .returning();
+    const extraSession = async () => {
+      const token = randomToken();
+      await db.insert(sessions).values({ userId: pwUser.id, tokenHash: sha256Hex(token), expiresAt: new Date(Date.now() + 3600_000) });
+      return (path: string) => request(app.getHttpServer()).get(path).set('Cookie', `bv_session=${token}`);
+    };
+    const main = request.agent(app.getHttpServer());
+    await main.post('/api/v1/auth/login').send({ username: 'pwuser', password: 'oldpass123' }).expect(201);
+    const other = await extraSession();
+
+    const wrong = await main
+      .post('/api/v1/auth/change-password')
+      .send({ currentPassword: 'nope12345', newPassword: 'newpass123' })
+      .expect(400);
+    expect(wrong.body.message).toBe('Mật khẩu hiện tại không đúng');
+    await main.post('/api/v1/auth/change-password').send({ currentPassword: 'oldpass123', newPassword: 'short1' }).expect(400);
+    await main.post('/api/v1/auth/change-password').send({ currentPassword: 'oldpass123', newPassword: 'oldpass123' }).expect(400);
+
+    const ok = await main
+      .post('/api/v1/auth/change-password')
+      .send({ currentPassword: 'oldpass123', newPassword: 'newpass123' })
+      .expect(201);
+    expect(ok.body).toEqual({ ok: true, revokedSessions: 1 });
+    await main.get('/api/v1/auth/me').expect(200);
+    await other('/api/v1/auth/me').expect(401);
+    await request(app.getHttpServer()).post('/api/v1/auth/login').send({ username: 'pwuser', password: 'oldpass123' }).expect(401);
+    const [stored] = await db.select().from(users).where(eq(users.id, pwUser.id));
+    expect(await argon2.verify(stored.passwordHash, 'newpass123')).toBe(true);
+
+    const third = await extraSession();
+    const revoked = await main.post('/api/v1/auth/logout-others').expect(201);
+    expect(revoked.body).toEqual({ ok: true, revokedSessions: 1 });
+    await third('/api/v1/auth/me').expect(401);
+    await main.get('/api/v1/auth/me').expect(200);
+
+    const logs = await adminAgent.get('/api/v1/audit-logs?q=pwuser&pageSize=100').expect(200);
+    const actions = logs.body.items.map((l: { action: string }) => l.action);
+    expect(actions).toEqual(expect.arrayContaining(['auth.password_changed', 'auth.sessions_revoked', 'auth.login', 'auth.login_failed']));
+    await db.delete(users).where(eq(users.id, pwUser.id));
+  });
+
+  it('records admin actions in the audit log without secrets', async () => {
+    await adminAgent.patch(`/api/v1/tenants/${workspaceId}`).send({ plan: 'pro-audit' }).expect(200);
+    const created = await adminAgent
+      .post('/api/v1/llm-providers')
+      .send({ name: 'audit-provider', baseUrl: 'http://127.0.0.1:9/v1', model: 'm', apiKey: 'sk-secret-audit' })
+      .expect(201);
+    await adminAgent.delete(`/api/v1/llm-providers/${created.body.id}`).expect(200);
+
+    const res = await adminAgent.get('/api/v1/audit-logs?pageSize=100').expect(200);
+    const updated = res.body.items.find((l: { action: string; targetId: string }) => l.action === 'tenant.updated' && l.targetId === workspaceId);
+    expect(updated).toMatchObject({ actorUsername: 'admin', targetLabel: 'Shop 1', targetType: 'tenant' });
+    expect(updated.metadata.changes.plan.to).toBe('pro-audit');
+    const providerLogs = res.body.items.filter((l: { targetId: string }) => l.targetId === created.body.id);
+    expect(providerLogs.map((l: { action: string }) => l.action).sort()).toEqual(['provider.created', 'provider.deleted']);
+    expect(JSON.stringify(res.body)).not.toContain('sk-secret-audit');
+
+    const filtered = await adminAgent.get('/api/v1/audit-logs?action=provider.deleted').expect(200);
+    expect(filtered.body.items.every((l: { action: string }) => l.action === 'provider.deleted')).toBe(true);
+    await adminAgent.get('/api/v1/audit-logs?action=bogus').expect(400);
+    await agent.get('/api/v1/audit-logs').expect(403);
+
+    await adminAgent.patch(`/api/v1/tenants/${workspaceId}`).send({ plan: 'trial' }).expect(200);
+    await db.delete(auditLogs);
+  });
+
   it('disables setup once an admin exists', async () => {
     const status = await request(app.getHttpServer()).get('/api/v1/setup/status').expect(200);
     expect(status.body.needsSetup).toBe(false);
@@ -1877,6 +1964,7 @@ describe('bv-agent-msg e2e', () => {
         if (
           path.startsWith('/api/v1/tenants') ||
           path.startsWith('/api/v1/llm-providers') ||
+          path.startsWith('/api/v1/audit-logs') ||
           path.startsWith('/api/v1/auth') ||
           path.startsWith('/api/v1/setup') ||
           path.startsWith('/api/v1/signup') ||

@@ -6,6 +6,7 @@ import { llmProviders, messages } from '../../db/schema';
 import { decryptCredential, encryptCredential } from '../../common/crypto';
 import { uuidv7 } from '../../common/uuidv7';
 import { LlmService, TestResult } from '../bot/llm.service';
+import { AuditActor, AuditService } from '../audit/audit.service';
 
 /** Unsaved form values; `id` lets the form reuse the stored key when the key field is blank. */
 export interface DraftInput {
@@ -31,6 +32,7 @@ export class LlmProvidersService {
     @Inject(DRIZZLE) private readonly db: Db,
     private readonly config: ConfigService,
     private readonly llm: LlmService,
+    private readonly audit: AuditService,
   ) {}
 
   async list() {
@@ -41,7 +43,7 @@ export class LlmProvidersService {
     return rows.map((row) => this.toPublic(row));
   }
 
-  async create(input: ProviderInput) {
+  async create(input: ProviderInput, actor: AuditActor) {
     const id = uuidv7();
     const apiKey = input.apiKey?.trim() ?? '';
     const [row] = await this.db
@@ -59,10 +61,16 @@ export class LlmProvidersService {
       })
       .returning();
     this.llm.invalidate();
+    await this.audit.record(actor, {
+      action: 'provider.created',
+      workspaceId: null,
+      target: { type: 'provider', id: row.id, label: row.name },
+      metadata: { baseUrl: row.baseUrl, model: row.model, enabled: row.enabled, hasApiKey: Boolean(apiKey) },
+    });
     return this.toPublic(row);
   }
 
-  async update(id: string, input: ProviderInput) {
+  async update(id: string, input: ProviderInput, actor: AuditActor) {
     const existing = await this.getRow(id);
     const values: Record<string, unknown> = { updatedAt: new Date() };
     if (input.name !== undefined) values.name = input.name.trim();
@@ -79,13 +87,35 @@ export class LlmProvidersService {
 
     const [row] = await this.db.update(llmProviders).set(values).where(eq(llmProviders.id, id)).returning();
     this.llm.invalidate();
+    // Never put the key itself in the audit trail, only that it changed.
+    const changed = Object.keys(values).filter((k) => k !== 'updatedAt' && k !== 'apiKeyEnc' && k !== 'keyId');
+    const changes = Object.fromEntries(
+      changed
+        .filter((k) => String(existing[k as keyof typeof existing] ?? '') !== String(values[k] ?? ''))
+        .map((k) => [k, { from: existing[k as keyof typeof existing], to: values[k] }]),
+    );
+    if (input.apiKey) changes.apiKey = { from: '[ẩn]', to: '[đã đổi]' };
+    if (Object.keys(changes).length) {
+      await this.audit.record(actor, {
+        action: 'provider.updated',
+        workspaceId: null,
+        target: { type: 'provider', id, label: row.name },
+        metadata: { changes },
+      });
+    }
     return this.toPublic(row);
   }
 
-  async remove(id: string) {
-    await this.getRow(id);
+  async remove(id: string, actor: AuditActor) {
+    const existing = await this.getRow(id);
     await this.db.delete(llmProviders).where(eq(llmProviders.id, id));
     this.llm.invalidate();
+    await this.audit.record(actor, {
+      action: 'provider.deleted',
+      workspaceId: null,
+      target: { type: 'provider', id, label: existing.name },
+      metadata: { baseUrl: existing.baseUrl, model: existing.model },
+    });
     return { ok: true };
   }
 
