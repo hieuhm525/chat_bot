@@ -9,7 +9,7 @@ import { BotService, ResolveResult, RuleCandidate } from '../bot/bot.service';
 import { ChatMessage } from '../bot/llm.service';
 import { writeMessage } from './message-writer';
 import { tenantBlocked } from '../../common/tenant-status';
-import { splitReply, typingDelayMs } from '../../common/reply-pacing';
+import { splitReply, typingDelayMs } from './reply-pacing';
 import { OutboundService } from './outbound.service';
 
 const UNSUPPORTED_REPLY = 'Dạ em chưa xem được ảnh/file, anh/chị nhắn chữ giúp em ạ.';

@@ -14,5 +14,5 @@
     "paths": { "@/*": ["./app/*"] },
     "types": ["vite/client"]
   },
-  "include": ["app", "../src/common/rule-overlap.ts", "../src/common/normalize-text.ts"]
+  "include": ["app", "../src/shared/rule-overlap.ts", "../src/shared/normalize-text.ts"]
 }

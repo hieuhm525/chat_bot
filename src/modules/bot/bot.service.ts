@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, Db } from '../../db/db.module';
 import { botRules, bots, channels, messages, workspaces } from '../../db/schema';
-import { containsWords, normalizeText } from '../../common/normalize-text';
+import { containsWords, normalizeText } from '../../shared/normalize-text';
 import { LlmService, ChatMessage } from './llm.service';
 
 export interface ResolveResult {
