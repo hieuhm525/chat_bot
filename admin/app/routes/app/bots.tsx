@@ -129,7 +129,7 @@ export function Bots() {
                 <TableCell>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" asChild>
-                      <Link to={`/bots/${bot.id}`} className="hover:no-underline">
+                      <Link to={`/bots/${bot.id}?tab=config`} className="hover:no-underline">
                         <Settings2 />
                         Cấu hình
                       </Link>
