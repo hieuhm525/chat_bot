@@ -11,6 +11,7 @@ import {
   Power,
   PowerOff,
   Save,
+  Sparkles,
   Search,
   Trash2,
   X,
@@ -43,6 +44,7 @@ interface Rule {
   priority: number;
   answer: string;
   quickReplies: string[];
+  useAi: boolean;
   enabled: boolean;
 }
 
@@ -174,7 +176,7 @@ function ConfigTab(props: {
             <Input id="b-name" value={bot.name} onChange={(e) => setBot({ ...bot, name: e.target.value })} maxLength={100} />
           </Field>
           <Field label="Lời chào" htmlFor="b-greeting">
-            <Input id="b-greeting" value={bot.greeting} onChange={(e) => setBot({ ...bot, greeting: e.target.value })} />
+            <Textarea id="b-greeting" value={bot.greeting} onChange={(e) => setBot({ ...bot, greeting: e.target.value })} />
           </Field>
           <Field label="Nút bấm dưới lời chào" htmlFor="b-greeting-qr" hint={QUICK_REPLY_HINT} error={greetingParsed.error}>
             <Input
@@ -190,7 +192,7 @@ function ConfigTab(props: {
             htmlFor="b-wait"
             hint="Gửi trước nếu AI cần hơn 6 giây để trả lời. Để trống để tắt."
           >
-            <Input
+            <Textarea
               id="b-wait"
               value={bot.waitMessage}
               maxLength={1000}
@@ -198,14 +200,14 @@ function ConfigTab(props: {
             />
           </Field>
           <Field label="Câu trả lời khi không hiểu" htmlFor="b-fallback">
-            <Input
+            <Textarea
               id="b-fallback"
               value={bot.fallbackMessage}
               onChange={(e) => setBot({ ...bot, fallbackMessage: e.target.value })}
             />
           </Field>
           <Field label="Câu chuyển người" htmlFor="b-handoff">
-            <Input
+            <Textarea
               id="b-handoff"
               value={bot.handoffMessage}
               onChange={(e) => setBot({ ...bot, handoffMessage: e.target.value })}
@@ -470,9 +472,9 @@ function RulesTab(props: { botId: string; rules: Rule[]; reload: () => Promise<v
                   aria-label="Chọn tất cả rule trong trang này"
                 />
               </TableHead>
-              <TableHead className="w-20">Ưu tiên</TableHead>
+              <TableHead className="hidden w-20 sm:table-cell">Ưu tiên</TableHead>
               <TableHead>Tên</TableHead>
-              <TableHead>Keyword</TableHead>
+              <TableHead className="hidden lg:table-cell">Keyword</TableHead>
               <TableHead>Bật</TableHead>
               <TableHead />
             </TableRow>
@@ -489,14 +491,27 @@ function RulesTab(props: { botId: string; rules: Rule[]; reload: () => Promise<v
                       aria-label={`Chọn rule ${rule.name}`}
                     />
                   </TableCell>
-                  <TableCell className="tabular-nums">{rule.priority}</TableCell>
-                  <TableCell className="max-w-72">
-                    <div className="truncate font-medium">{rule.name}</div>
+                  <TableCell className="hidden tabular-nums sm:table-cell">{rule.priority}</TableCell>
+                  <TableCell className="max-w-36 sm:max-w-72">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-medium">{rule.name}</span>
+                      {rule.useAi && (
+                        <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-xs" title="AI trả lời dựa trên nội dung rule">
+                          <Sparkles className="size-3" />
+                          AI
+                        </Badge>
+                      )}
+                    </div>
                     <div className="truncate text-xs text-muted-foreground" title={rule.answer}>
                       {rule.answer}
                     </div>
+                    {/* Narrow screens: priority and keyword columns fold into this line. */}
+                    <div className="truncate text-xs text-muted-foreground lg:hidden">
+                      <span className="sm:hidden">Ưu tiên {rule.priority} · </span>
+                      {rule.keywords.length} keyword
+                    </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <div className="flex max-w-md flex-wrap gap-1">
                       {rule.keywords.slice(0, MAX_KEYWORDS_SHOWN).map((k) => (
                         <Badge key={k} variant="secondary" className="font-normal">
@@ -618,7 +633,7 @@ function RulesTab(props: { botId: string; rules: Rule[]; reload: () => Promise<v
   );
 }
 
-const emptyForm = { name: '', keywords: '', priority: 0, answer: '', quickReplies: '', enabled: true };
+const emptyForm = { name: '', keywords: '', priority: 0, answer: '', quickReplies: '', useAi: false, enabled: true };
 
 function RuleDialog(props: {
   botId: string;
@@ -645,7 +660,7 @@ function RuleDialog(props: {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
-    const keywords = form.keywords.split(',').map((k) => k.trim()).filter(Boolean);
+    const keywords = form.keywords.split(/[,\n]/).map((k) => k.trim()).filter(Boolean);
     const problems = [
       ...(keywords.length ? [] : ['Keyword: cần ít nhất 1 keyword, phân cách bằng dấu phẩy.']),
       ...(quickReplies.error ? [`Nút trả lời nhanh: ${quickReplies.error}.`] : []),
@@ -661,6 +676,7 @@ function RuleDialog(props: {
       priority: Number(form.priority),
       answer: form.answer,
       quickReplies: quickReplies.items,
+      useAi: form.useAi,
       enabled: form.enabled,
     });
     try {
@@ -702,7 +718,7 @@ function RuleDialog(props: {
               />
             </Field>
             <Field label="Keyword" htmlFor="r-keywords" hint="Các cách khách hay hỏi, phân cách bằng dấu phẩy; tin nhắn chứa 1 cụm là khớp. Mỗi cụm ≥2 từ, ví dụ: phí ship, tiền ship, ship bao nhiêu. Không cần gõ thêm bản không dấu hay viết tắt." className="sm:col-span-2">
-              <Input
+              <Textarea
                 id="r-keywords"
                 value={form.keywords}
                 onChange={(e) => setForm({ ...form, keywords: e.target.value })}
@@ -733,6 +749,19 @@ function RuleDialog(props: {
                 onChange={(e) => setForm({ ...form, quickReplies: e.target.value })}
               />
             </Field>
+            <div className="grid gap-1.5 sm:col-span-2">
+              <SwitchRow
+                id="r-use-ai"
+                label="AI trả lời dựa trên nội dung này"
+                checked={form.useAi}
+                onChange={(v) => setForm({ ...form, useAi: v })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Bật cho câu trả lời cần tính theo thông tin của khách (chọn size theo chiều cao/cân nặng, tính phí ship theo
+                tỉnh…): AI đọc nội dung này rồi trả lời đúng trường hợp. Tắt thì gửi nguyên văn, nhanh và không tốn token. Cần bật
+                "Dùng AI" trong tab Cấu hình; AI lỗi thì vẫn gửi nguyên văn.
+              </p>
+            </div>
             <SwitchRow id="r-enabled" label="Bật rule" checked={form.enabled} onChange={(v) => setForm({ ...form, enabled: v })} />
           </div>
           <DialogFooter>

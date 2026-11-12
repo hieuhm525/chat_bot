@@ -144,7 +144,7 @@ function ThemeRow() {
 
 function UserMenu({ user, onLogout, compact }: { user: User; onLogout: () => void; compact?: boolean }) {
   const role = ROLE_LABEL[user.role] ?? user.role;
-  const { state } = useSidebar();
+  const { state, isMobile } = useSidebar();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -174,7 +174,8 @@ function UserMenu({ user, onLogout, compact }: { user: User; onLogout: () => voi
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        side={compact ? 'bottom' : state === 'collapsed' ? 'right' : 'top'}
+        // The mobile drawer is always expanded, so the desktop collapsed state must not push the menu off-screen.
+        side={compact ? 'bottom' : !isMobile && state === 'collapsed' ? 'right' : 'top'}
         sideOffset={8}
         className="w-56"
       >

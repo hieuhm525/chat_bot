@@ -1,5 +1,6 @@
 import { FormEvent, UIEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowLeft, Bot, ChevronUp, Filter, Hand, Loader2, MessagesSquare, Search, Send, Undo2, UserRound } from 'lucide-react';
+import { ArrowLeft, Bot, ChevronUp, Filter, Hand, Loader2, MessagesSquare, Search, Send, Undo2, UserRound, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api } from '../../api';
 import { Notices } from '@/components/page';
@@ -32,6 +33,7 @@ interface Message {
   direction: 'in' | 'out';
   senderType: 'customer' | 'bot' | 'agent' | 'system';
   senderName: string;
+  botId: string | null;
   content: string;
   status: string;
   errorCode: string | null;
@@ -71,15 +73,16 @@ interface Filters {
   search: string;
 }
 
-/** Today as YYYY-MM-DD in the viewer's local timezone (toISOString would give the UTC date). */
-function today() {
+/** YYYY-MM-DD in the viewer's local timezone, `daysAgo` days back (toISOString would give the UTC date). */
+function localDay(daysAgo = 0) {
   const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/** Last 3 days (today and the 2 before): recent enough to stay fast, wide enough that yesterday's customer still shows. */
 function defaultFilters(): Filters {
-  const day = today();
-  return { channelId: '', botId: '', mode: '', assignedUserId: '', from: day, to: day, search: '' };
+  return { channelId: '', botId: '', mode: '', assignedUserId: '', from: localDay(2), to: localDay(), search: '' };
 }
 
 const MODE_LABEL: Record<string, string> = { bot: 'Bot', human: 'Người trả lời', off: 'Đã tắt' };
@@ -138,6 +141,17 @@ function initials(name: string) {
 
 function formatTime(value: string | null) {
   return value ? new Date(value).toLocaleString('vi-VN') : '—';
+}
+
+/** Short time for lists and bubbles: "14:05" today, "14:05 11/11" this year, full date otherwise. */
+function shortTime(value: string | null) {
+  if (!value) return '—';
+  const d = new Date(value);
+  const now = new Date();
+  const time = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return time;
+  const day = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return d.getFullYear() === now.getFullYear() ? `${time} ${day}` : `${time} ${day}/${d.getFullYear()}`;
 }
 
 function CustomerAvatar({ name, url, size }: { name: string; url?: string | null; size?: 'sm' | 'default' | 'lg' }) {
@@ -280,6 +294,13 @@ export function Conversations() {
     loadPage(undefined, filters);
   }, []);
 
+  const clearFilters = () => {
+    const cleared = { ...defaultFilters(), search: filters.search };
+    setFilters(cleared);
+    loadPage(undefined, cleared);
+    setFiltersOpen(false);
+  };
+
   const applyFilters = (e: FormEvent) => {
     e.preventDefault();
     loadPage(undefined, filters);
@@ -315,7 +336,8 @@ export function Conversations() {
     return run('send', 'Gửi tin thất bại', async () => {
       await api(`/conversations/${selected.id}/messages`, { method: 'POST', body: JSON.stringify({ content: text }) });
       setText('');
-      await loadDetail(selected.id);
+      // Sending auto-takes over a bot thread, so the list's mode badge changes too.
+      await Promise.all([loadDetail(selected.id), selected.mode === 'bot' ? loadPage(undefined, filters) : null]);
     });
   };
 
@@ -352,8 +374,8 @@ export function Conversations() {
   useDocumentTitle(customerName ? `${customerName} · Hội thoại` : 'Hội thoại');
 
   return (
-    <div className="grid h-full grid-rows-1 md:h-screen md:grid-cols-[380px_1fr]">
-      <section className={cn('min-h-0 flex-col border-r bg-card md:flex', selected ? 'hidden' : 'flex')}>
+    <div className="grid h-full grid-cols-1 grid-rows-1 md:h-screen lg:grid-cols-[380px_minmax(0,1fr)]">
+      <section className={cn('min-h-0 flex-col border-r bg-card lg:flex', selected ? 'hidden' : 'flex')}>
         <div className="space-y-3 border-b p-4">
           <h1 className="text-lg font-semibold tracking-tight">Hội thoại</h1>
           <form className="space-y-2" onSubmit={applyFilters}>
@@ -433,10 +455,18 @@ export function Conversations() {
                   <Input id="f-to" type="date" className="h-8" value={filters.to} onChange={setFilter('to')} />
                 </div>
               </div>
-              <Button type="submit" size="sm" className="w-full">
-                <Filter />
-                Áp dụng bộ lọc
-              </Button>
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" className="flex-1">
+                  <Filter />
+                  Áp dụng bộ lọc
+                </Button>
+                {activeFilterCount > 0 && (
+                  <Button type="button" size="sm" variant="outline" onClick={clearFilters}>
+                    <X />
+                    Xoá lọc
+                  </Button>
+                )}
+              </div>
             </div>
           </form>
         </div>
@@ -463,7 +493,9 @@ export function Conversations() {
                 <span className="min-w-0 flex-1 space-y-0.5">
                   <span className="flex items-baseline justify-between gap-2">
                     <span className="truncate text-sm font-medium">{name}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{formatTime(item.lastMessageAt)}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground" title={formatTime(item.lastMessageAt)}>
+                      {shortTime(item.lastMessageAt)}
+                    </span>
                   </span>
                   <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                     <Badge variant="secondary" className={cn('px-1.5 py-0 text-xs', MODE_CLASS[item.mode])}>
@@ -497,7 +529,7 @@ export function Conversations() {
         </div>
       </section>
 
-      <section className={cn('min-h-0 flex-col bg-background md:flex', selected ? 'flex' : 'hidden')}>
+      <section className={cn('min-h-0 flex-col bg-background lg:flex', selected ? 'flex' : 'hidden')}>
         {!selected ? (
           <div className="m-auto flex flex-col items-center gap-3 text-muted-foreground">
             <span className="grid size-12 place-items-center rounded-full bg-muted">
@@ -507,12 +539,12 @@ export function Conversations() {
           </div>
         ) : (
           <>
-            <header className="flex items-center justify-between gap-3 border-b bg-card px-5 py-3">
+            <header className="flex items-center justify-between gap-3 border-b bg-card px-4 py-3 md:px-5">
               <div className="flex min-w-0 items-center gap-3">
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="-ml-2 md:hidden"
+                  className="-ml-2 lg:hidden"
                   aria-label="Quay lại danh sách hội thoại"
                   onClick={() => setSelected(null)}
                 >
@@ -521,23 +553,28 @@ export function Conversations() {
                 <CustomerAvatar name={customerName} url={selected.customer.profile?.avatarUrl} size="lg" />
                 <div className="min-w-0">
                   <h2 className="truncate font-semibold">{customerName}</h2>
-                  <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                  <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                     <Badge variant="secondary" className={cn('px-1.5 py-0 text-xs', MODE_CLASS[selected.mode])}>
                       {MODE_LABEL[selected.mode] ?? selected.mode}
                     </Badge>
-                    {selected.channel?.name}
-                    {selected.botName ? ` · ${selected.botName}` : ''}
-                    {selected.assignedUserName ? ` · ${selected.assignedUserName}` : ''}
+                    <span className="truncate">
+                      {selected.channel?.name}
+                      {selected.botName ? ` · ${selected.botName}` : ''}
+                      {selected.assignedUserName ? ` · ${selected.assignedUserName}` : ''}
+                    </span>
                   </p>
+                  {selected.mode === 'human' && (
+                    <p className="text-xs text-muted-foreground">Tự trả về bot nếu khách nhắn mà 30 phút chưa ai trả lời.</p>
+                  )}
                 </div>
               </div>
               {selected.mode === 'human' ? (
-                <Button variant="outline" size="sm" disabled={busy === 'act'} onClick={() => act('release')}>
+                <Button variant="outline" size="sm" className="shrink-0" disabled={busy === 'act'} onClick={() => act('release')}>
                   <Undo2 />
                   Trả lại bot
                 </Button>
               ) : (
-                <Button size="sm" disabled={busy === 'act'} onClick={() => act('takeover')}>
+                <Button size="sm" className="shrink-0" disabled={busy === 'act'} onClick={() => act('takeover')}>
                   <Hand />
                   Tiếp quản
                 </Button>
@@ -551,7 +588,7 @@ export function Conversations() {
               key={selected.id}
               role="log"
               aria-label={`Tin nhắn với ${customerName}`}
-              className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-5 py-4"
+              className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-4 md:px-5"
             >
               {hasOlder ? (
                 <Button
@@ -572,8 +609,8 @@ export function Conversations() {
                 const failed = m.status === 'failed' || m.status === 'blocked_by_policy';
                 if (m.senderType === 'system') {
                   return (
-                    <div key={m.id} className="self-center rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
-                      {m.content} · {formatTime(m.createdAt)}
+                    <div key={m.id} className="max-w-full self-center rounded-2xl bg-muted px-3 py-1 text-center text-xs text-muted-foreground">
+                      {m.content} · <time title={formatTime(m.createdAt)}>{shortTime(m.createdAt)}</time>
                     </div>
                   );
                 }
@@ -601,7 +638,7 @@ export function Conversations() {
                         : undefined
                     }
                   >
-                    <div className="mb-0.5 flex items-center justify-between gap-3 text-xs">
+                    <div className="mb-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
                       <span className="flex min-w-0 items-center gap-1.5 font-medium">
                         <span className="truncate">{fromCustomer ? customerName : m.senderName}</span>
                         {tag && (
@@ -610,9 +647,11 @@ export function Conversations() {
                           </Badge>
                         )}
                       </span>
-                      <time className="text-xs text-muted-foreground">{formatTime(m.createdAt)}</time>
+                      <time className="ml-auto shrink-0 text-xs text-muted-foreground" title={formatTime(m.createdAt)}>
+                        {shortTime(m.createdAt)}
+                      </time>
                     </div>
-                    <div className="whitespace-pre-wrap">{m.content}</div>
+                    <div className="break-words whitespace-pre-wrap">{m.content}</div>
                     <div className={cn('mt-1 text-xs text-muted-foreground', failed && 'text-destructive')}>
                       {STATUS_LABEL[m.status] ?? m.status}
                       {m.errorCode ? ` · Lý do: ${m.errorCode}` : ''}
@@ -636,12 +675,12 @@ export function Conversations() {
               })}
             </div>
 
-            <form className="flex gap-2 border-t bg-card px-5 py-3" onSubmit={send}>
+            <form className="flex gap-2 border-t bg-card px-4 py-3 md:px-5" onSubmit={send}>
               <Input
                 aria-label="Nội dung tin gửi khách"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Gửi tin cho khách…"
+                placeholder={selected.mode === 'bot' ? 'Gửi tin (bot sẽ tạm dừng)…' : 'Gửi tin cho khách…'}
               />
               <Button type="submit" disabled={!text.trim() || busy === 'send'}>
                 {busy === 'send' ? <Loader2 className="animate-spin" /> : <Send />}
@@ -658,23 +697,47 @@ export function Conversations() {
             <DialogTitle>Chi tiết tin của bot</DialogTitle>
           </DialogHeader>
           {detail && (
-            <dl className="grid grid-cols-[140px_1fr] gap-x-4 gap-y-2.5 text-sm">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2.5 text-sm">
               <dt className="text-muted-foreground">Nguồn trả lời</dt>
-              <dd>{SOURCE_LABEL[String(detail.metadata.source)] ?? String(detail.metadata.source ?? '—')}</dd>
-              <dt className="text-muted-foreground">Rule</dt>
-              <dd className="break-all font-mono text-xs">{String(detail.metadata.ruleId ?? '—')}</dd>
-              <dt className="text-muted-foreground">Model</dt>
-              <dd className="break-all">{String(detail.metadata.model ?? '—')}</dd>
-              <dt className="text-muted-foreground">Provider</dt>
-              <dd>{String(detail.metadata.provider ?? '—')}</dd>
-              <dt className="text-muted-foreground">Token vào / ra</dt>
-              <dd className="tabular-nums">
-                {String(detail.metadata.tokensIn ?? '—')} / {String(detail.metadata.tokensOut ?? '—')}
-              </dd>
-              <dt className="text-muted-foreground">Độ trễ</dt>
-              <dd className="tabular-nums">
-                {detail.metadata.latencyMs ? `${String(detail.metadata.latencyMs)} ms` : '—'}
-              </dd>
+              <dd>{SOURCE_LABEL[String(detail.metadata.source)] ?? String(detail.metadata.source ?? 'Không rõ')}</dd>
+              {/* Only rows that apply: a rule answer has no model/tokens, an AI answer has no rule. */}
+              {detail.metadata.ruleId != null && (
+                <>
+                  <dt className="text-muted-foreground">Rule</dt>
+                  <dd>
+                    {detail.botId ? (
+                      <Link to={`/bots/${detail.botId}`} onClick={() => setDetail(null)}>
+                        Xem bộ rule của AI agent
+                      </Link>
+                    ) : (
+                      <span className="font-mono text-xs break-all">{String(detail.metadata.ruleId)}</span>
+                    )}
+                  </dd>
+                </>
+              )}
+              {detail.metadata.model != null && (
+                <>
+                  <dt className="text-muted-foreground">Model</dt>
+                  <dd className="break-all">
+                    {String(detail.metadata.model)}
+                    {detail.metadata.provider != null ? ` (${String(detail.metadata.provider)})` : ''}
+                  </dd>
+                </>
+              )}
+              {detail.metadata.tokensIn != null && (
+                <>
+                  <dt className="text-muted-foreground">Token vào / ra</dt>
+                  <dd className="tabular-nums">
+                    {String(detail.metadata.tokensIn)} / {String(detail.metadata.tokensOut ?? '?')}
+                  </dd>
+                </>
+              )}
+              {detail.metadata.latencyMs != null && (
+                <>
+                  <dt className="text-muted-foreground">Độ trễ</dt>
+                  <dd className="tabular-nums">{String(detail.metadata.latencyMs)} ms</dd>
+                </>
+              )}
             </dl>
           )}
         </DialogContent>

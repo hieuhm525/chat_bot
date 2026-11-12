@@ -184,6 +184,8 @@ export class ChannelsService {
       ok: false,
       detail: err instanceof Error ? err.message : 'unknown',
     }));
+    // The token check only proves we can call Meta; a dead tunnel or wrong Callback URL only shows on the way back in.
+    if (result.ok) result.detail = `${result.detail}. ${await this.inboundStatus(row.id, workspaceId)}`;
     // A health check never re-enables a channel the tenant disabled on purpose.
     if (row.status === 'disabled') return result;
 
@@ -198,6 +200,25 @@ export class ChannelsService {
       throw err;
     }
     return result;
+  }
+
+  /** When Meta last reached our webhook for this channel, phrased so a stale value points at the Callback URL. */
+  private async inboundStatus(channelId: string, workspaceId: string): Promise<string> {
+    const [ws] = await this.db
+      .select({ timezone: workspaces.timezone })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    const [{ last }] = await this.db
+      .select({ last: sql<Date | null>`max(${webhookEvents.receivedAt})` })
+      .from(webhookEvents)
+      .where(eq(webhookEvents.channelId, channelId));
+    const fix =
+      'Nếu vừa nhắn thử vào Page mà mốc này không đổi, Meta không gọi được server: kiểm tra Callback URL ở Meta → Webhooks ' +
+      'có đúng địa chỉ công khai hiện tại của server (tunnel đổi địa chỉ mỗi lần chạy lại) và đã tick messages, messaging_postbacks.';
+    if (!last) return `Chưa nhận được sự kiện nào từ Meta. ${fix}`;
+    const when = new Date(last).toLocaleString('vi-VN', { timeZone: ws?.timezone ?? 'Asia/Ho_Chi_Minh' });
+    return `Lần cuối nhận sự kiện từ Meta: ${when}. ${fix}`;
   }
 
   /** Pushes Get Started + persistent menu to Meta first; it is saved only when Meta accepted it. */

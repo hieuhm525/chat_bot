@@ -43,6 +43,26 @@ function BackAndHome() {
   );
 }
 
+/** A page whose data failed to load (not found, network, 500): say why and give a way out, not a bare alert. */
+export function LoadErrorPage({ message }: { message: string }) {
+  return (
+    <ErrorScreen
+      icon={<ServerCrash className="size-6" />}
+      title="Không tải được trang"
+      description={message}
+      actions={
+        <>
+          <Button variant="outline" onClick={() => window.location.reload()}>
+            <RotateCw />
+            Thử lại
+          </Button>
+          <BackAndHome />
+        </>
+      }
+    />
+  );
+}
+
 export function NotFoundPage() {
   return (
     <ErrorScreen

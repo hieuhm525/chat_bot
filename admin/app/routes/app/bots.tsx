@@ -101,6 +101,9 @@ export function Bots() {
           </>
         }
       />
+      {full && (
+        <p className="text-sm text-muted-foreground">Gói hiện tại đã đạt giới hạn số AI agent. Xoá bớt agent hoặc nâng gói.</p>
+      )}
       <Notices error={error} notice={notice} />
 
       <TableCard>
@@ -109,8 +112,8 @@ export function Bots() {
             <TableRow>
               <TableHead>Tên</TableHead>
               <TableHead>Bật</TableHead>
-              <TableHead>Rule</TableHead>
-              <TableHead>Kênh đang gắn</TableHead>
+              <TableHead className="hidden text-right sm:table-cell">Rule</TableHead>
+              <TableHead className="hidden text-right sm:table-cell">Kênh</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
@@ -121,18 +124,21 @@ export function Bots() {
                   <Link to={`/bots/${bot.id}`} className="text-foreground">
                     {bot.name}
                   </Link>
+                  <span className="block text-xs font-normal text-muted-foreground sm:hidden">
+                    {bot.ruleCount} rule · {bot.channelCount} kênh
+                  </span>
                 </TableCell>
                 <TableCell>
                   <Switch checked={bot.enabled} onCheckedChange={() => toggle(bot)} aria-label="Bật AI agent" />
                 </TableCell>
-                <TableCell className="tabular-nums">{bot.ruleCount}</TableCell>
-                <TableCell className="tabular-nums">{bot.channelCount}</TableCell>
+                <TableCell className="hidden text-right tabular-nums sm:table-cell">{bot.ruleCount}</TableCell>
+                <TableCell className="hidden text-right tabular-nums sm:table-cell">{bot.channelCount}</TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" asChild>
-                      <Link to={`/bots/${bot.id}?tab=config`} className="hover:no-underline">
+                      <Link to={`/bots/${bot.id}?tab=config`} className="hover:no-underline" aria-label={`Cấu hình ${bot.name}`}>
                         <Settings2 />
-                        Cấu hình
+                        <span className="max-md:hidden">Cấu hình</span>
                       </Link>
                     </Button>
                     <IconAction

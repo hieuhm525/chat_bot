@@ -1,0 +1,1 @@
+ALTER TABLE "bot_rules" ADD COLUMN "use_ai" boolean DEFAULT false NOT NULL;
