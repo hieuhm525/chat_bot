@@ -199,6 +199,12 @@ describe('bv-agent-msg e2e', () => {
       if (url.includes('/chat/completions')) {
         llmCalls.push(url);
         llmBodies.push(String(init?.body ?? ''));
+        if (url.includes('noinfo.example')) {
+          return new Response(
+            JSON.stringify({ model: 'test-model', choices: [{ message: { content: 'KHONG_CO_THONG_TIN' } }] }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
         if (url.includes('bad.example')) {
           return new Response(JSON.stringify({ error: 'nope' }), {
             status: 500,
@@ -413,6 +419,40 @@ describe('bv-agent-msg e2e', () => {
     expect(last.senderUserId).toBe(ownerUserId);
     expect(last.metadata.source).toBe('agent');
     expect(last.status).toBe('sent');
+    // Replying while the bot was on pauses it, so bot and staff never answer side by side.
+    expect(detail.body.mode).toBe('human');
+    expect(detail.body.messages.at(-2)).toMatchObject({
+      senderType: 'system',
+      metadata: { kind: 'takeover', userId: ownerUserId, auto: true },
+    });
+    await agent.post(`/api/v1/conversations/${conversationId}/release`).expect(201);
+  });
+
+  it('gives an idle human thread back to the bot on the next customer message', async () => {
+    const thread = 'psid-idle';
+    await postWebhook(payload('giờ mở cửa', 'mid-idle-1', thread));
+    await drain();
+    const conversation = await conversationByThread(thread);
+    await agent.post(`/api/v1/conversations/${conversation.id}/takeover`).expect(201);
+
+    // Recent takeover: the bot stays silent.
+    await postWebhook(payload('giờ mở cửa', 'mid-idle-2', thread));
+    await drain();
+    let detail = await agent.get(`/api/v1/conversations/${conversation.id}`).expect(200);
+    expect(detail.body.mode).toBe('human');
+    expect(detail.body.messages.at(-1).senderType).toBe('customer');
+
+    // Takeover 31 minutes ago with no staff reply since: the bot answers again.
+    await db
+      .update(messages)
+      .set({ createdAt: new Date(Date.now() - 31 * 60_000) })
+      .where(sql`${messages.conversationId} = ${conversation.id} and ${messages.metadata}->>'kind' = 'takeover'`);
+    await postWebhook(payload('giờ mở cửa', 'mid-idle-3', thread));
+    await drain();
+    detail = await agent.get(`/api/v1/conversations/${conversation.id}`).expect(200);
+    expect(detail.body.mode).toBe('bot');
+    expect(detail.body.messages.find((m: any) => m.metadata.kind === 'auto_release')).toMatchObject({ senderType: 'system' });
+    expect(detail.body.messages.at(-1)).toMatchObject({ senderType: 'bot', metadata: { source: 'rule' } });
   });
 
   it('stores the greeting and the rule answer as separate bot messages', async () => {
@@ -1172,6 +1212,8 @@ describe('bv-agent-msg e2e', () => {
     // A health check must not silently re-enable a channel the tenant disabled.
     const checked = await agent.post(`/api/v1/channels/${page1.id}/test`).expect(201);
     expect(checked.body.ok).toBe(true);
+    // The token check alone cannot see a dead tunnel, so the result also says when Meta last reached us.
+    expect(checked.body.detail).toMatch(/Lần cuối nhận sự kiện từ Meta: |Chưa nhận được sự kiện nào từ Meta/);
     const [stillDisabled] = await db.select().from(channels).where(eq(channels.id, page1.id));
     expect(stillDisabled.status).toBe('disabled');
 
@@ -1281,11 +1323,93 @@ describe('bv-agent-msg e2e', () => {
     await adminAgent.delete(`/api/v1/llm-providers/${provider.body.id}`).expect(200);
   });
 
+  it('hands off to a human when the LLM keeps saying it has no information', async () => {
+    const provider = await adminAgent
+      .post('/api/v1/llm-providers')
+      .send({ name: 'noinfo-provider', baseUrl: 'https://noinfo.example/v1', model: 'm', apiKey: 'sk-noinfo-1234', priority: 60 })
+      .expect(201);
+    const before = await agent.get(`/api/v1/bots/${botId}`).expect(200);
+    await agent.patch(`/api/v1/bots/${botId}`).send({ pauseAfterFallbacks: 2, llmEnabled: true }).expect(200);
+
+    await postWebhook(payload('shop có bán giày không', 'mid-noinfo-1', 'psid-noinfo'));
+    await drain();
+    await postWebhook(payload('thế có bán túi xách không', 'mid-noinfo-2', 'psid-noinfo'));
+    await drain();
+
+    const conversation = await conversationByThread('psid-noinfo');
+    const detail = await agent.get(`/api/v1/conversations/${conversation.id}`).expect(200);
+    expect(detail.body.mode).toBe('human');
+    // The marker never reaches the customer; they get the shop's own sentence.
+    expect(detail.body.messages.some((m: any) => m.content.includes('KHONG_CO_THONG_TIN'))).toBe(false);
+    expect(detail.body.messages.filter((m: any) => m.metadata.source === 'fallback')).toHaveLength(2);
+    expect(detail.body.messages.at(-1).metadata.kind).toBe('auto_handoff');
+
+    await agent.post(`/api/v1/conversations/${conversation.id}/release`).expect(201);
+    await agent.patch(`/api/v1/bots/${botId}`).send({ pauseAfterFallbacks: before.body.pauseAfterFallbacks, llmEnabled: before.body.llmEnabled }).expect(200);
+    await adminAgent.delete(`/api/v1/llm-providers/${provider.body.id}`).expect(200);
+  });
+
+  it('hands off at once when the customer asks for a person, e.g. the "Gặp nhân viên" button', async () => {
+    await postWebhook(payload('Gặp nhân viên', 'mid-human-1', 'psid-human'));
+    await drain();
+    const conversation = await conversationByThread('psid-human');
+    const detail = await agent.get(`/api/v1/conversations/${conversation.id}`).expect(200);
+    expect(detail.body.mode).toBe('human');
+    const kinds = detail.body.messages.map((m: any) => m.metadata.kind ?? m.senderType);
+    expect(kinds).toEqual(['customer', 'handoff', 'auto_handoff']);
+    expect(detail.body.messages[1]).toMatchObject({ senderType: 'bot', status: 'sent', metadata: { reason: 'customer_request' } });
+    await agent.post(`/api/v1/conversations/${conversation.id}/release`).expect(201);
+  });
+
+  it('never feeds system lines (takeover, release) to the LLM as if the bot said them', async () => {
+    const provider = await adminAgent
+      .post('/api/v1/llm-providers')
+      .send({ name: 'history-provider', baseUrl: 'https://good.example/v1', model: 'm', apiKey: 'sk-history-1234', priority: 70 })
+      .expect(201);
+    await postWebhook(payload('một câu hỏi tự do', 'mid-hist-1', 'psid-hist'));
+    await drain();
+    const conversation = await conversationByThread('psid-hist');
+    await agent.post(`/api/v1/conversations/${conversation.id}/takeover`).expect(201);
+    await agent.post(`/api/v1/conversations/${conversation.id}/release`).expect(201);
+
+    llmBodies.length = 0;
+    await postWebhook(payload('thêm một câu hỏi tự do', 'mid-hist-2', 'psid-hist'));
+    await drain();
+    const body = JSON.parse(llmBodies.at(-1) as string);
+    const said = body.messages.filter((m: { role: string }) => m.role !== 'system').map((m: { content: string }) => m.content).join('\n');
+    expect(said).toContain('thêm một câu hỏi tự do');
+    expect(said).not.toContain('đã tiếp quản');
+    expect(said).not.toContain('trả hội thoại về cho bot');
+    await adminAgent.delete(`/api/v1/llm-providers/${provider.body.id}`).expect(200);
+  });
+
   it('rejects a system prompt longer than 4000 characters', async () => {
     await agent
       .patch(`/api/v1/bots/${botId}`)
       .send({ systemPrompt: 'a'.repeat(4001) })
       .expect(400);
+  });
+
+  it('keeps the useAi flag and answers verbatim when no LLM is available', async () => {
+    const created = await agent
+      .post(`/api/v1/bots/${botId}/rules`)
+      .send({ name: 'Tư vấn cỡ', keywords: ['tư vấn cỡ'], answer: 'Dạ bảng cỡ: M 52-60kg ạ.', useAi: true })
+      .expect(201);
+    expect(created.body.useAi).toBe(true);
+
+    // The test env has no LLM provider: the customer must still get the rule text, not silence or the fallback.
+    await postWebhook(payload('tư vấn cỡ giúp em, em nặng 55kg', 'mid-useai-1', 'psid-useai'));
+    await drain();
+    const conversation = await conversationByThread('psid-useai');
+    const detail = await agent.get(`/api/v1/conversations/${conversation.id}`).expect(200);
+    expect(detail.body.messages.at(-1)).toMatchObject({
+      content: 'Dạ bảng cỡ: M 52-60kg ạ.',
+      metadata: { source: 'rule', ruleId: created.body.id },
+    });
+
+    const off = await agent.patch(`/api/v1/bots/${botId}/rules/${created.body.id}`).send({ useAi: false }).expect(200);
+    expect(off.body.useAi).toBe(false);
+    await agent.delete(`/api/v1/bots/${botId}/rules/${created.body.id}`).expect(200);
   });
 
   it('paces a rule answer, attaches its quick replies and shows typing first', async () => {

@@ -1,4 +1,4 @@
-import { BotService, chunkText, parseDraftRules, scoreRule, RuleCandidate } from './bot.service';
+import { BotService, chunkText, NO_INFO, parseDraftRules, scoreRule, RuleCandidate, wantsHuman } from './bot.service';
 
 const rule = (over: Partial<RuleCandidate> = {}): RuleCandidate => ({
   id: 'r1',
@@ -57,6 +57,20 @@ describe('scoreRule', () => {
   });
 });
 
+describe('wantsHuman', () => {
+  it('catches requests for a person, with or without accents and in caps', () => {
+    for (const text of ['Gặp nhân viên', 'cho em gap nhan vien voi', 'GẶP NGƯỜI THẬT!', 'cho mình gặp ad', 'mình muốn nói chuyện với người', 'không muốn nói chuyện với bot']) {
+      expect(wantsHuman(text)).toBe(true);
+    }
+  });
+
+  it('ignores questions that only mention staff', () => {
+    for (const text of ['nhân viên giao hàng tới chưa', 'shop có mấy nhân viên', 'người mẫu mặc size gì', 'phí ship bao nhiêu']) {
+      expect(wantsHuman(text)).toBe(false);
+    }
+  });
+});
+
 describe('BotService.resolve', () => {
   const bot = {
     name: 'CSKH',
@@ -70,6 +84,62 @@ describe('BotService.resolve', () => {
     const service = new BotService({} as any, { enabled: false } as any);
     const result = await service.resolve(bot, [rule()], [], 'giờ mở cửa');
     expect(result).toMatchObject({ source: 'rule', text: '8h-20h', ruleId: 'r1' });
+  });
+
+  describe('rule with useAi', () => {
+    const shirt = rule({ id: 'shirt', name: 'Tư vấn size', keywords: ['size gì'], priority: 30, answer: 'Bảng size áo: L 60-70kg', useAi: true, quickReplies: ['Đặt hàng'] });
+    const trousers = rule({ id: 'trousers', name: 'Bảng size quần', keywords: ['quần size'], priority: 28, answer: 'Size quần: 34 (76-85kg)' });
+    const fee = rule({ id: 'fee', name: 'Phí ship', keywords: ['phí ship'], answer: '30k' });
+    const message = 'cao 1m72 nặng 81kg mặc quần size gì';
+    const okLlm = () => ({ complete: jest.fn().mockResolvedValue({ text: 'Dạ anh lấy quần size 34 ạ.', provider: 'p', model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 5 }) });
+
+    it('lets the LLM tailor the answer, with every matched rule as focus', async () => {
+      const llm = okLlm();
+      const service = new BotService({} as any, llm as any);
+      const result = await service.resolve(bot, [shirt, trousers, fee], [{ role: 'user', content: message }], message);
+      expect(result).toMatchObject({ text: 'Dạ anh lấy quần size 34 ạ.', source: 'llm', ruleId: 'shirt', quickReplies: ['Đặt hàng'] });
+      const system: string = llm.complete.mock.calls[0][0][0].content;
+      const focus = system.slice(system.indexOf('ưu tiên dùng chúng'), system.indexOf('Thông tin:'));
+      expect(focus).toContain('Bảng size áo');
+      expect(focus).toContain('Size quần: 34');
+      expect(focus).not.toContain('Phí ship');
+    });
+
+    it('sends the rule verbatim when the LLM fails', async () => {
+      const llm = { complete: jest.fn().mockRejectedValue(new Error('timeout')) };
+      const service = new BotService({} as any, llm as any);
+      const result = await service.resolve(bot, [shirt], [], message);
+      expect(result).toMatchObject({ text: 'Bảng size áo: L 60-70kg', source: 'rule', ruleId: 'shirt' });
+    });
+
+    it('stays verbatim when the bot has AI turned off, and for rules without useAi', async () => {
+      const llm = okLlm();
+      const service = new BotService({} as any, llm as any);
+      expect(await service.resolve({ ...bot, llmEnabled: false }, [shirt], [], message)).toMatchObject({ source: 'rule' });
+      expect(await service.resolve(bot, [fee], [], 'phí ship bao nhiêu')).toMatchObject({ source: 'rule', text: '30k' });
+      expect(llm.complete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('LLM without an answer', () => {
+    const llmSaying = (text: string) => ({ complete: jest.fn().mockResolvedValue({ text, provider: 'p', model: 'm', tokensIn: 3, tokensOut: 1, latencyMs: 5 }) });
+
+    it('counts the marker as a fallback and sends the shop fallback sentence', async () => {
+      const service = new BotService({} as any, llmSaying(NO_INFO) as any);
+      const result = await service.resolve(bot, [], [], 'shop có bán giày không');
+      expect(result).toMatchObject({ text: bot.fallbackMessage, source: 'fallback', model: 'm' });
+    });
+
+    it('also catches a model that copies the fallback sentence instead of the marker', async () => {
+      const service = new BotService({} as any, llmSaying('dạ em chưa có thông tin ạ') as any);
+      expect(await service.resolve(bot, [], [], 'bán giày không')).toMatchObject({ source: 'fallback' });
+    });
+
+    it('falls back to the rule text when a useAi rule matched but the LLM has no answer', async () => {
+      const service = new BotService({} as any, llmSaying(NO_INFO) as any);
+      const r = rule({ useAi: true, answer: '8h-20h' });
+      expect(await service.resolve(bot, [r], [], 'giờ mở cửa')).toMatchObject({ source: 'rule', text: '8h-20h' });
+    });
   });
 
   it('returns llm usage metadata', async () => {

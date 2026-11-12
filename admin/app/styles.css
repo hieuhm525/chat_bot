@@ -137,7 +137,8 @@
   [data-slot='card-title'] {
     text-wrap: balance;
   }
-  a {
+  /* shadcn parts rendered as links (menu items, asChild buttons) carry data-slot and their own colours. */
+  a:not([data-slot]) {
     @apply text-primary underline-offset-4 hover:underline;
   }
   code {

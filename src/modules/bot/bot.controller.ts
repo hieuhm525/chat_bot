@@ -67,6 +67,7 @@ class CreateRuleDto {
   @IsString({ each: true })
   @MaxLength(QUICK_REPLY_TITLE_MAX, { each: true, message: `Mỗi nút trả lời nhanh tối đa ${QUICK_REPLY_TITLE_MAX} ký tự (giới hạn của Messenger)` })
   quickReplies?: string[];
+  @IsOptional() @IsBoolean() useAi?: boolean;
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
@@ -103,6 +104,7 @@ class UpdateRuleDto {
   @IsString({ each: true })
   @MaxLength(QUICK_REPLY_TITLE_MAX, { each: true, message: `Mỗi nút trả lời nhanh tối đa ${QUICK_REPLY_TITLE_MAX} ký tự (giới hạn của Messenger)` })
   quickReplies?: string[];
+  @IsOptional() @IsBoolean() useAi?: boolean;
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 

@@ -275,6 +275,8 @@ export const botRules = pgTable(
     answer: text('answer').notNull(),
     /** Buttons shown under the answer (Messenger quick replies). */
     quickReplies: text('quick_replies').array().notNull().default(sql`'{}'::text[]`),
+    /** On a match, let the LLM tailor this answer to the customer's details (size from height/weight…) instead of sending it verbatim. */
+    useAi: boolean('use_ai').notNull().default(false),
     enabled: boolean('enabled').notNull().default(true),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt,

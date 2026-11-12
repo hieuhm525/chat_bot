@@ -274,6 +274,24 @@ export class ConversationsService {
   async sendAgentMessage(workspaceId: string, id: string, userId: string, content: string) {
     const conversation = await this.getConversation(workspaceId, id);
     return this.db.transaction(async (tx) => {
+      // Replying while the bot is on would let bot and human answer side by side: pause the bot first.
+      const [paused] = await tx
+        .update(conversations)
+        .set({ mode: 'human', assignedUserId: userId, updatedAt: new Date() })
+        .where(and(eq(conversations.id, conversation.id), eq(conversations.mode, 'bot')))
+        .returning({ id: conversations.id });
+      if (paused) {
+        await writeMessage(tx, {
+          workspaceId,
+          channelId: conversation.channelId,
+          conversationId: conversation.id,
+          direction: 'out',
+          senderType: 'system',
+          content: `${await this.username(tx, userId)} đã tiếp quản hội thoại (tự động khi gửi tin)`,
+          status: 'sent',
+          metadata: { kind: 'takeover', userId, auto: true },
+        });
+      }
       const message = await writeMessage(tx, {
         workspaceId,
         channelId: conversation.channelId,

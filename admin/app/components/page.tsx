@@ -26,7 +26,7 @@ export function PageHeader(props: {
           <h1 className="text-2xl font-semibold tracking-tight">{props.title}</h1>
           {props.description && <p className="max-w-3xl text-sm text-muted-foreground">{props.description}</p>}
         </div>
-        {props.actions && <div className="flex items-center gap-2">{props.actions}</div>}
+        {props.actions && <div className="flex flex-wrap items-center gap-2">{props.actions}</div>}
       </div>
     </div>
   );
@@ -111,13 +111,7 @@ export function Loading({ label = 'Đang tải…' }: { label?: string }) {
   );
 }
 
-export function LoadError({ message }: { message: string }) {
-  return (
-    <div className="p-8">
-      <Notices error={message} />
-    </div>
-  );
-}
+export { LoadErrorPage as LoadError } from './error-pages';
 
 export function TableCard({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn('overflow-hidden rounded-xl border bg-card shadow-sm', className)}>{children}</div>;

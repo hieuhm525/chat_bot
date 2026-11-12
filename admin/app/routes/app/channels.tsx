@@ -200,8 +200,8 @@ export function Channels() {
         description="Kết nối Fanpage Messenger để AI agent tự trả lời tin nhắn khách."
         actions={
           <>
-            <Badge variant="outline" className="h-7 px-3 text-sm">
-              {activeCount} / {data.maxChannels} kênh theo gói (kênh đã tắt không tính)
+            <Badge variant="outline" className="h-7 px-3 text-sm" title="Kênh đã tắt không tính vào giới hạn gói">
+              {activeCount} / {data.maxChannels} kênh theo gói
             </Badge>
             <Button
               onClick={openAdd}
@@ -214,6 +214,7 @@ export function Channels() {
           </>
         }
       />
+      {bots.length > 0 && full && <p className="text-sm text-muted-foreground">{addBlocked}</p>}
       {!bots.length && (
         <Notices error="Chưa thêm được kênh: hãy tạo AI agent trước (menu AI agent), kênh cần một agent để trả lời." />
       )}
@@ -242,10 +243,10 @@ export function Channels() {
           <TableHeader>
             <TableRow>
               <TableHead>Tên</TableHead>
-              <TableHead>Nền tảng</TableHead>
-              <TableHead>Page ID</TableHead>
-              <TableHead>AI agent</TableHead>
-              <TableHead>Verify token</TableHead>
+              <TableHead className="hidden lg:table-cell">Nền tảng</TableHead>
+              <TableHead className="hidden lg:table-cell">Page ID</TableHead>
+              <TableHead className="hidden sm:table-cell">AI agent</TableHead>
+              <TableHead className="hidden lg:table-cell">Verify token</TableHead>
               <TableHead>Trạng thái</TableHead>
               <TableHead />
             </TableRow>
@@ -253,11 +254,18 @@ export function Channels() {
           <TableBody>
             {data.items.map((c) => (
               <TableRow key={c.id}>
-                <TableCell className="font-medium">{c.name}</TableCell>
-                <TableCell>{PROVIDER_LABEL[c.provider] ?? c.provider}</TableCell>
-                <TableCell className="font-mono text-xs">{c.externalId}</TableCell>
-                <TableCell>{botName(c.botId)}</TableCell>
-                <TableCell>
+                <TableCell className="font-medium">
+                  {c.name}
+                  {/* Phones: the hidden columns fold into one line under the name. */}
+                  <span className="block text-xs font-normal text-muted-foreground lg:hidden">
+                    {PROVIDER_LABEL[c.provider] ?? c.provider}
+                    <span className="sm:hidden"> · {botName(c.botId)}</span>
+                  </span>
+                </TableCell>
+                <TableCell className="hidden lg:table-cell">{PROVIDER_LABEL[c.provider] ?? c.provider}</TableCell>
+                <TableCell className="hidden font-mono text-xs lg:table-cell">{c.externalId}</TableCell>
+                <TableCell className="hidden sm:table-cell">{botName(c.botId)}</TableCell>
+                <TableCell className="hidden lg:table-cell">
                   {c.config?.verifyToken ? (
                     <Copy value={c.config.verifyToken} short />
                   ) : (
@@ -272,14 +280,14 @@ export function Channels() {
                 <TableCell>
                   <div className="flex justify-end gap-1">
                     {c.provider === 'messenger' && (
-                      <Button variant="outline" size="sm" onClick={() => setMenuFor(c)}>
+                      <Button variant="outline" size="sm" onClick={() => setMenuFor(c)} aria-label={`Menu của ${c.name}`}>
                         <Menu />
-                        Menu
+                        <span className="max-lg:hidden">Menu</span>
                       </Button>
                     )}
-                    <Button variant="outline" size="sm" onClick={() => test(c)}>
+                    <Button variant="outline" size="sm" onClick={() => test(c)} aria-label={`Kiểm tra kênh ${c.name}`}>
                       <PlugZap />
-                      Kiểm tra
+                      <span className="max-lg:hidden">Kiểm tra</span>
                     </Button>
                     <IconAction
                       className="text-destructive hover:bg-destructive/10 hover:text-destructive"
@@ -563,7 +571,7 @@ function MenuDialog(props: { channel: Channel | null; onClose: () => void; onSav
           <Notices error={error} />
 
           <div className="grid gap-1.5">
-            <div className="flex items-center gap-3">
+            <div className="flex items-start gap-3">
               <Switch
                 id="m-get-started"
                 checked={getStarted || forcedGetStarted}
@@ -585,7 +593,7 @@ function MenuDialog(props: { channel: Channel | null; onClose: () => void; onSav
             <Label>Menu cố định ({items.length}/{MAX_MENU_ITEMS})</Label>
             {!items.length && <p className="text-sm text-muted-foreground">Chưa có mục nào.</p>}
             {items.map((item, index) => (
-              <div key={index} className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[1fr_1.4fr_auto]">
+              <div key={index} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto]">
                 <Field
                   label={<span className="sr-only">Tên mục {index + 1}</span>}
                   htmlFor={`m-title-${index}`}
@@ -603,19 +611,19 @@ function MenuDialog(props: { channel: Channel | null; onClose: () => void; onSav
                   label={<span className="sr-only">Link của mục {index + 1}</span>}
                   htmlFor={`m-url-${index}`}
                   error={submitted ? errors[index].url : undefined}
-                  className="col-span-1 row-start-2 sm:row-start-auto"
+                  className="col-span-2 row-start-2 sm:col-span-1 sm:row-start-auto"
                 >
                   <Input
                     id={`m-url-${index}`}
                     value={item.url ?? ''}
-                    placeholder="Link https:// (bỏ trống = gửi cho bot)"
+                    placeholder="Link https:// (tuỳ chọn)"
                     aria-invalid={submitted && Boolean(errors[index].url)}
                     onChange={(e) => update(index, { url: e.target.value })}
                   />
                 </Field>
                 <IconAction
                   type="button"
-                  className="row-start-1 mt-0.5 sm:row-start-auto"
+                  className="col-start-2 row-start-1 mt-0.5 sm:col-start-auto sm:row-start-auto"
                   onClick={() => setItems(items.filter((_, i) => i !== index))}
                   label={`Xoá mục ${index + 1}${item.title ? ` (${item.title})` : ''}`}
                   tooltip="Xoá mục"
