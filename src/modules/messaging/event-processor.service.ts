@@ -18,8 +18,6 @@ const HISTORY_LIMIT = 10;
 const WAIT_MESSAGE_AFTER_MS = 6000;
 /** Messenger avatar URLs are signed and expire, so profiles are refreshed about daily. */
 const PROFILE_TTL_MS = 24 * 3600 * 1000;
-/** A human-mode thread with no staff activity this long goes back to the bot on the customer's next message. */
-export const HUMAN_IDLE_RELEASE_MS = 30 * 60 * 1000;
 
 type CustomerRow = typeof customers.$inferSelect;
 
@@ -132,31 +130,6 @@ export class EventProcessor {
         .update(conversations)
         .set({ lastMessageAt: event.occurredAt, messageCount: count, updatedAt: new Date() })
         .where(eq(conversations.id, conversation.id));
-
-      if (conversation.mode === 'human' && (await this.humanIdle(tx, conversation.id, new Date()))) {
-        // Staff forgot "Trả lại bot": a customer waiting on nobody gets the bot back instead of silence.
-        await tx
-          .update(conversations)
-          .set({ mode: 'bot', assignedUserId: null, fallbackCount: 0, updatedAt: new Date() })
-          .where(eq(conversations.id, conversation.id));
-        await writeMessage(tx, {
-          workspaceId: channel.workspaceId,
-          channelId: channel.id,
-          conversationId: conversation.id,
-          direction: 'out',
-          senderType: 'system',
-          content: `Tự trả hội thoại về bot vì không có người trả lời trong ${HUMAN_IDLE_RELEASE_MS / 60_000} phút`,
-          status: 'sent',
-          metadata: { kind: 'auto_release', idleMs: HUMAN_IDLE_RELEASE_MS },
-        });
-        this.logger.log({ msg: 'Tự trả hội thoại về bot', conversationId: conversation.id, channelId: channel.id });
-        return {
-          duplicate: false as const,
-          conversation: { ...conversation, mode: 'bot', fallbackCount: 0 },
-          customer,
-          isFirst: count === 1,
-        };
-      }
 
       return { duplicate: false as const, conversation, customer, isFirst: count === 1 };
     });
@@ -432,24 +405,6 @@ export class EventProcessor {
         .where(eq(customers.id, customer.id));
       throw err;
     }
-  }
-
-  /**
-   * True when nobody acted as a human in this thread (takeover, auto handoff or a staff reply, incl. Page Inbox)
-   * for HUMAN_IDLE_RELEASE_MS before `now`.
-   */
-  private async humanIdle(tx: Db, conversationId: string, now: Date): Promise<boolean> {
-    const [{ last }] = await tx
-      .select({ last: sql<Date | null>`max(${messages.createdAt})` })
-      .from(messages)
-      .where(
-        and(
-          eq(messages.conversationId, conversationId),
-          sql`(${messages.senderType} = 'agent' or ${messages.metadata}->>'kind' in ('takeover', 'auto_handoff'))`,
-        ),
-      );
-    // No marker at all (mode set before markers existed): treat as idle so the thread is not stuck forever.
-    return !last || now.getTime() - new Date(last).getTime() > HUMAN_IDLE_RELEASE_MS;
   }
 
   /** A reply typed directly in the Page Inbox: store it as an outbound agent message. */

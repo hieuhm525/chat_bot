@@ -428,33 +428,6 @@ describe('bv-agent-msg e2e', () => {
     await agent.post(`/api/v1/conversations/${conversationId}/release`).expect(201);
   });
 
-  it('gives an idle human thread back to the bot on the next customer message', async () => {
-    const thread = 'psid-idle';
-    await postWebhook(payload('giờ mở cửa', 'mid-idle-1', thread));
-    await drain();
-    const conversation = await conversationByThread(thread);
-    await agent.post(`/api/v1/conversations/${conversation.id}/takeover`).expect(201);
-
-    // Recent takeover: the bot stays silent.
-    await postWebhook(payload('giờ mở cửa', 'mid-idle-2', thread));
-    await drain();
-    let detail = await agent.get(`/api/v1/conversations/${conversation.id}`).expect(200);
-    expect(detail.body.mode).toBe('human');
-    expect(detail.body.messages.at(-1).senderType).toBe('customer');
-
-    // Takeover 31 minutes ago with no staff reply since: the bot answers again.
-    await db
-      .update(messages)
-      .set({ createdAt: new Date(Date.now() - 31 * 60_000) })
-      .where(sql`${messages.conversationId} = ${conversation.id} and ${messages.metadata}->>'kind' = 'takeover'`);
-    await postWebhook(payload('giờ mở cửa', 'mid-idle-3', thread));
-    await drain();
-    detail = await agent.get(`/api/v1/conversations/${conversation.id}`).expect(200);
-    expect(detail.body.mode).toBe('bot');
-    expect(detail.body.messages.find((m: any) => m.metadata.kind === 'auto_release')).toMatchObject({ senderType: 'system' });
-    expect(detail.body.messages.at(-1)).toMatchObject({ senderType: 'bot', metadata: { source: 'rule' } });
-  });
-
   it('stores the greeting and the rule answer as separate bot messages', async () => {
     await agent.patch(`/api/v1/bots/${botId}`).send({ greeting: 'Dạ em chào anh/chị ạ.' }).expect(200);
     await postWebhook(payload('giờ mở cửa', 'mid-greeting', 'psid-4'));

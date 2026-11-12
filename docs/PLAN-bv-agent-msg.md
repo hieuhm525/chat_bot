@@ -621,6 +621,7 @@ Không dùng mock DB. Test chống rò rỉ tenant là test bắt buộc trong C
 | Microservices | Cần scale worker độc lập hoặc deploy riêng |
 | Billing, workflow builder, CRM | Có mô hình kinh doanh và khách trả tiền cho nó |
 | Ảnh hoá dashboard/báo cáo | Có người dùng thật hỏi "tôi tìm X ở đâu" |
+| Tự trả hội thoại về bot khi nhân viên tiếp quản rồi bỏ quên (đã có bản 30 phút, gỡ ở 11/2026 để ưu tiên thao tác tay; xem git log `HUMAN_IDLE_RELEASE_MS`). Làm lại nên có: ngưỡng cấu hình theo bot, job định kỳ thay vì chỉ kiểm tra khi khách nhắn | Nhân viên hay quên bấm "Trả lại bot" và khách bị bỏ lơ |
 
 ---
 
