@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { Check, Loader2, LogOut, Monitor, Moon, Sun, X } from 'lucide-react';
+import { Check, Loader2, LogOut, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, ApiError } from '../../api';
 import type { User } from '../../App';
@@ -11,7 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { PasswordInput } from '@/components/password-input';
-import { setTheme, useTheme, type Theme } from '@/lib/theme';
+import { setTheme, THEME_OPTIONS, useTheme, type Theme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { initials, ROLE_LABEL } from '@/lib/user';
 
@@ -160,12 +160,6 @@ function SessionsCard() {
     </Button>
   );
 }
-
-const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: typeof Sun }> = [
-  { value: 'light', label: 'Sáng', icon: Sun },
-  { value: 'dark', label: 'Tối', icon: Moon },
-  { value: 'system', label: 'Theo hệ thống', icon: Monitor },
-];
 
 function ThemePicker() {
   const { theme } = useTheme();
