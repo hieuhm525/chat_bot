@@ -1,6 +1,13 @@
 import { useSyncExternalStore } from 'react';
+import { Monitor, Moon, Sun, type LucideIcon } from 'lucide-react';
 
 export type Theme = 'light' | 'dark' | 'system';
+
+export const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: LucideIcon }> = [
+  { value: 'light', label: 'Sáng', icon: Sun },
+  { value: 'dark', label: 'Tối', icon: Moon },
+  { value: 'system', label: 'Theo hệ thống', icon: Monitor },
+];
 
 /** Same key as the pre-paint script in admin/index.html; change both together. */
 const STORAGE_KEY = 'theme';

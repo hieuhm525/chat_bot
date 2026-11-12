@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type ReactElement } from 'react';
-import { Link, Navigate, NavLink, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
+import { Link, matchPath, Navigate, NavLink, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
 import {
   Bot,
   Building2,
@@ -10,6 +10,8 @@ import {
   LogOut,
   Menu,
   MessagesSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
   Radio,
   UserRound,
 } from 'lucide-react';
@@ -26,7 +28,22 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  useSidebar,
+} from '@/components/ui/sidebar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { setTheme, THEME_OPTIONS, useTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { initials, ROLE_LABEL } from '@/lib/user';
 import { api, ApiError, currentArea, safeNextPath } from './api';
@@ -85,8 +102,49 @@ async function loadBoot(): Promise<Boot> {
   }
 }
 
+/**
+ * Inline theme switch for the account menu. The three options are real menu items, so arrow keys reach them,
+ * and choosing one keeps the menu open so the change is visible before closing.
+ */
+function ThemeRow() {
+  const { theme } = useTheme();
+  return (
+    <div className="flex items-center justify-between gap-3 px-2 py-1">
+      <span className="text-sm">Giao diện</span>
+      <div role="group" aria-label="Giao diện" className="flex gap-0.5 rounded-md bg-muted p-0.5">
+        {THEME_OPTIONS.map(({ value, label, icon: Icon }) => {
+          const active = theme === value;
+          return (
+            <Tooltip key={value}>
+              <TooltipTrigger asChild>
+                <DropdownMenuItem
+                  role="menuitemradio"
+                  aria-checked={active}
+                  aria-label={label}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setTheme(value);
+                  }}
+                  className={cn(
+                    'size-9 justify-center rounded-sm p-0 md:size-7',
+                    active && 'bg-background text-foreground shadow-xs focus:bg-background [&_svg]:text-foreground',
+                  )}
+                >
+                  <Icon />
+                </DropdownMenuItem>
+              </TooltipTrigger>
+              <TooltipContent>{label}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function UserMenu({ user, onLogout, compact }: { user: User; onLogout: () => void; compact?: boolean }) {
   const role = ROLE_LABEL[user.role] ?? user.role;
+  const { state } = useSidebar();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -97,25 +155,35 @@ function UserMenu({ user, onLogout, compact }: { user: User; onLogout: () => voi
             </Avatar>
           </Button>
         ) : (
-          <button className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent">
+          <SidebarMenuButton
+            size="lg"
+            className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+          >
             <Avatar className="size-8">
               <AvatarFallback className="bg-sidebar-accent text-xs font-semibold text-sidebar-accent-foreground">
                 {initials(user.username)}
               </AvatarFallback>
             </Avatar>
-            <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-sm font-medium text-sidebar-accent-foreground">{user.username}</div>
-              <div className="text-xs text-sidebar-foreground/70">{role}</div>
+            <div className="grid min-w-0 flex-1 leading-tight">
+              <span className="truncate text-sm font-medium text-sidebar-accent-foreground">{user.username}</span>
+              <span className="truncate text-xs text-sidebar-foreground/70">{role}</span>
             </div>
-            <ChevronsUpDown className="size-4 text-sidebar-foreground/70" />
-          </button>
+            <ChevronsUpDown className="ml-auto text-sidebar-foreground/70" />
+          </SidebarMenuButton>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side={compact ? 'bottom' : 'top'} className="w-56">
+      <DropdownMenuContent
+        align="end"
+        side={compact ? 'bottom' : state === 'collapsed' ? 'right' : 'top'}
+        sideOffset={8}
+        className="w-56"
+      >
         <DropdownMenuLabel className="font-normal">
           <div className="truncate text-sm font-medium">{user.username}</div>
           <div className="text-xs text-muted-foreground">{role}</div>
         </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <ThemeRow />
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link to="/account">
@@ -132,53 +200,115 @@ function UserMenu({ user, onLogout, compact }: { user: User; onLogout: () => voi
   );
 }
 
+
 /** Rendered at /login once signed in: continue to `?next=` (same-area paths only) or home. */
 function AfterLogin() {
   const [params] = useSearchParams();
   return <Navigate to={safeNextPath(params.get('next'))} replace />;
 }
 
-function Brand() {
+/** In the sidebar the tile lines up with the nav icons and the name hides when collapsed; `compact` is the mobile top bar. */
+function Brand({ compact }: { compact?: boolean }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <span className="grid size-8 place-items-center rounded-lg bg-sidebar-primary text-xs font-bold text-sidebar-primary-foreground">
+    <div className="flex min-w-0 items-center gap-3">
+      <span
+        className={cn(
+          'grid shrink-0 place-items-center rounded-lg bg-sidebar-primary font-bold text-sidebar-primary-foreground',
+          compact ? 'size-8 text-xs' : 'size-10 text-sm',
+        )}
+      >
         bv
       </span>
-      <div className="leading-tight">
-        <div className="text-sm font-semibold text-sidebar-accent-foreground">bv-agent-msg</div>
-        <div className="text-xs text-sidebar-foreground/70">{area === 'admin' ? 'Quản trị hệ thống' : 'Workspace'}</div>
+      <div className="min-w-0 leading-tight group-data-[collapsible=icon]:hidden">
+        <div className={cn('truncate font-semibold text-sidebar-accent-foreground', compact ? 'text-sm' : 'text-[15px]')}>
+          bv-agent-msg
+        </div>
+        <div className="truncate text-xs text-sidebar-foreground/70">
+          {area === 'admin' ? 'Quản trị hệ thống' : 'Workspace'}
+        </div>
       </div>
     </div>
   );
 }
 
-function NavLinks({ links, onNavigate }: { links: NavItem[]; onNavigate?: () => void }) {
+function NavLinks({ links }: { links: NavItem[] }) {
+  const { pathname } = useLocation();
+  const { isMobile, setOpenMobile } = useSidebar();
   return (
-    <nav aria-label="Điều hướng chính" className="flex flex-col gap-1 px-3">
-      {links.map(({ to, label, icon: Icon, end }) => (
-        <NavLink
-          key={to}
-          to={to}
-          end={end}
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground no-underline transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:no-underline',
-              isActive && 'bg-sidebar-accent text-sidebar-accent-foreground',
-            )
-          }
-        >
-          <Icon className="size-4" />
-          {label}
-        </NavLink>
-      ))}
-    </nav>
+    <SidebarGroup>
+      <SidebarGroupContent>
+        <nav aria-label="Điều hướng chính">
+          <SidebarMenu className="gap-1">
+            {links.map(({ to, label, icon: Icon, end }) => (
+              <SidebarMenuItem key={to}>
+                <SidebarMenuButton asChild tooltip={label} isActive={Boolean(matchPath({ path: to, end: end ?? false }, pathname))}>
+                  <NavLink
+                    to={to}
+                    end={end}
+                    onClick={() => isMobile && setOpenMobile(false)}
+                    className="font-medium text-sidebar-foreground no-underline hover:no-underline"
+                  >
+                    <Icon />
+                    <span>{label}</span>
+                  </NavLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </nav>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
+}
+
+/** Desktop only: on phones the sidebar is a drawer that closes itself. */
+function CollapseToggle() {
+  const { state, toggleSidebar } = useSidebar();
+  const collapsed = state === 'collapsed';
+  return (
+    <SidebarMenuItem className="hidden md:block">
+      <SidebarMenuButton
+        onClick={toggleSidebar}
+        tooltip="Mở rộng thanh bên (Ctrl+B)"
+        aria-expanded={!collapsed}
+        className="text-sidebar-foreground/80"
+      >
+        {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+        <span>Thu gọn</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+function MobileHeader({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const { setOpenMobile } = useSidebar();
+  return (
+    <header className="flex shrink-0 items-center justify-between gap-2 border-b border-sidebar-border bg-sidebar px-3 py-2 text-sidebar-foreground md:hidden">
+      <div className="flex min-w-0 items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          onClick={() => setOpenMobile(true)}
+          aria-label="Mở menu điều hướng"
+        >
+          <Menu />
+        </Button>
+        <Brand compact />
+      </div>
+      <UserMenu user={user} onLogout={onLogout} compact />
+    </header>
+  );
+}
+
+/** SidebarProvider persists open/collapsed in this cookie; there is no server render to read it, so read it here. */
+function readSidebarOpen(): boolean {
+  const match = /(?:^|;\s*)sidebar_state=(true|false)/.exec(document.cookie);
+  return match ? match[1] === 'true' : true;
 }
 
 export function App() {
   const [boot, setBoot] = useState<Boot>({ state: 'loading' });
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
 
   const start = useCallback(() => {
@@ -266,80 +396,63 @@ export function App() {
   const ownerOnly = (el: ReactElement) => (isOwner ? el : <ForbiddenPage />);
 
   return (
-    <div className="flex h-dvh flex-col md:h-auto md:min-h-screen md:flex-row">
+    <SidebarProvider defaultOpen={readSidebarOpen()} className="h-dvh md:h-auto">
       <a
         href="#main"
         className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground no-underline focus:not-sr-only focus:fixed focus:top-3 focus:left-3 hover:no-underline"
       >
         Bỏ qua tới nội dung chính
       </a>
-      {/* Mobile: top bar with a drawer for navigation. */}
-      <header className="flex shrink-0 items-center justify-between gap-2 border-b bg-sidebar px-3 py-2 text-sidebar-foreground md:hidden">
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Mở menu điều hướng"
-          >
-            <Menu />
-          </Button>
+      <Sidebar collapsible="icon" className="border-sidebar-border">
+        <SidebarHeader className="py-4">
           <Brand />
-        </div>
-        <UserMenu user={user} onLogout={logout} compact />
-      </header>
-      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <SheetContent side="left" className="w-72 gap-2 border-sidebar-border bg-sidebar p-0 text-sidebar-foreground">
-          <SheetHeader className="px-5 py-4">
-            <SheetTitle className="sr-only">Điều hướng</SheetTitle>
-            <SheetDescription className="sr-only">Chọn trang cần mở</SheetDescription>
-            <Brand />
-          </SheetHeader>
-          <NavLinks links={links} onNavigate={() => setDrawerOpen(false)} />
-        </SheetContent>
-      </Sheet>
+        </SidebarHeader>
+        <SidebarContent>
+          <NavLinks links={links} />
+        </SidebarContent>
+        <SidebarFooter className="border-t border-sidebar-border">
+          <SidebarMenu className="gap-1">
+            <CollapseToggle />
+            <SidebarMenuItem>
+              <UserMenu user={user} onLogout={logout} />
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+        <SidebarRail />
+      </Sidebar>
 
-      {/* Desktop: fixed sidebar with the account menu at the bottom. */}
-      <aside className="hidden shrink-0 flex-col bg-sidebar text-sidebar-foreground md:sticky md:top-0 md:flex md:h-screen md:w-60">
-        <div className="px-5 py-5">
-          <Brand />
-        </div>
-        <NavLinks links={links} />
-        <div className="mt-auto border-t border-sidebar-border p-3">
-          <UserMenu user={user} onLogout={logout} />
-        </div>
-      </aside>
-
-      <main id="main" tabIndex={-1} className="min-h-0 min-w-0 flex-1 overflow-y-auto outline-none md:overflow-visible">
-        <RouteErrorBoundary resetKey={location.pathname}>
-          <Suspense fallback={<Loading />}>
-            {area === 'admin' ? (
-              <Routes>
-                <Route path="/" element={<Tenants />} />
-                <Route path="/providers" element={<Providers />} />
-                <Route path="/audit" element={<AuditLog />} />
-                <Route path="/account" element={<Account user={user} />} />
-                <Route path="/login" element={<AfterLogin />} />
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
-            ) : (
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/conversations" element={<Conversations />} />
-                <Route path="/channels" element={ownerOnly(<Channels />)} />
-                <Route path="/bots" element={ownerOnly(<Bots />)} />
-                <Route path="/bots/:botId" element={ownerOnly(<BotDetail />)} />
-                <Route path="/bots/:botId/import" element={ownerOnly(<RuleImport />)} />
-                <Route path="/account" element={<Account user={user} />} />
-                <Route path="/login" element={<AfterLogin />} />
-                <Route path="/register" element={<Navigate to="/" replace />} />
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
-            )}
-          </Suspense>
-        </RouteErrorBoundary>
-      </main>
-    </div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <MobileHeader user={user} onLogout={logout} />
+        <main id="main" tabIndex={-1} className="min-h-0 min-w-0 flex-1 overflow-y-auto outline-none md:overflow-visible">
+          <RouteErrorBoundary resetKey={location.pathname}>
+            <Suspense fallback={<Loading />}>
+              {area === 'admin' ? (
+                <Routes>
+                  <Route path="/" element={<Tenants />} />
+                  <Route path="/providers" element={<Providers />} />
+                  <Route path="/audit" element={<AuditLog />} />
+                  <Route path="/account" element={<Account user={user} />} />
+                  <Route path="/login" element={<AfterLogin />} />
+                  <Route path="*" element={<NotFoundPage />} />
+                </Routes>
+              ) : (
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/conversations" element={<Conversations />} />
+                  <Route path="/channels" element={ownerOnly(<Channels />)} />
+                  <Route path="/bots" element={ownerOnly(<Bots />)} />
+                  <Route path="/bots/:botId" element={ownerOnly(<BotDetail />)} />
+                  <Route path="/bots/:botId/import" element={ownerOnly(<RuleImport />)} />
+                  <Route path="/account" element={<Account user={user} />} />
+                  <Route path="/login" element={<AfterLogin />} />
+                  <Route path="/register" element={<Navigate to="/" replace />} />
+                  <Route path="*" element={<NotFoundPage />} />
+                </Routes>
+              )}
+            </Suspense>
+          </RouteErrorBoundary>
+        </main>
+      </div>
+    </SidebarProvider>
   );
 }
