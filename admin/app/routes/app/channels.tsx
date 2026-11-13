@@ -354,27 +354,40 @@ export function Channels() {
                 <ol className="space-y-3 text-sm leading-relaxed">
                   {[
                     <>
-                      Vào Meta Developers, tạo App loại Business, thêm sản phẩm <b>Messenger</b>.
+                      Ở Meta Developers, mở App của bạn → <b>Cài đặt ứng dụng › Thông tin cơ bản</b>: điền{' '}
+                      <b>URL chính sách quyền riêng tư</b> là <code>{`${window.location.origin}/privacy`}</code> (hoặc trang
+                      chính sách của shop nếu đã có), bấm <b>Thêm nền tảng</b> → Website với địa chỉ website của shop (chưa có
+                      thì dùng link chính sách ở trên) → <b>Lưu thay đổi</b>.
                     </>,
                     <>
-                      App settings → Basic: copy <b>App Secret</b> vào form.
+                      Cũng ở trang đó, ô <b>Khóa bí mật của ứng dụng</b> → <b>Hiển thị</b> (nhập mật khẩu Facebook): copy vào
+                      ô <b>App Secret</b>.
                     </>,
                     <>
-                      Messenger → Settings → <b>Generate access tokens</b>: chọn Fanpage, copy <b>Page Access Token</b> và{' '}
-                      <b>Page ID</b> vào form.
+                      Mục <b>Đăng</b> → bấm <b>Đăng</b> cho tới khi App hiện “Đã đăng”. Chưa đăng thì bot chỉ trả lời người có
+                      vai trò trong App.
                     </>,
                     <>
-                      Bấm <b>Lưu và kết nối</b> trước: hệ thống tạo Verify Token, kiểm tra token và tự đăng ký Page nhận tin
-                      nhắn.
+                      Mục <b>Đăng</b> → <b>Tương tác với khách hàng trên Messenger from Meta</b> → <b>Cài đặt API Messenger</b>.
+                      Ở <b>2. Tạo mã truy cập</b>: bấm <b>Kết nối</b>, chọn “Chọn áp dụng cho riêng Trang hiện tại” và đúng
+                      Fanpage → Lưu → Đã hiểu.
                     </>,
                     <>
-                      Messenger → Settings → <b>Webhooks</b>: dán <b>Callback URL</b> và <b>Verify Token</b> (hiện ra sau khi
-                      lưu, hoặc copy ở bảng kênh phía trên), bấm Verify and save. Nếu Page chưa nhận tin, bấm <b>Kiểm tra</b>{' '}
-                      ở bảng kênh để đăng ký lại.
+                      Bấm <b>Thêm đăng ký</b>, tick <b>messages</b> và <b>messaging_postbacks</b> → Confirm.
                     </>,
                     <>
-                      Nhắn thử vào Fanpage từ một tài khoản khác. App ở chế độ Development chỉ nhận tin từ người có vai trò
-                      trong App.
+                      Cột Mã → <b>Tạo</b> → tick “Tôi hiểu” → copy vào ô <b>Page Access Token</b> (mã chỉ hiện một lần). Dãy số
+                      xanh dưới tên Page là <b>Page ID</b>.
+                    </>,
+                    <>
+                      Bấm <b>Lưu và kết nối</b>: Verify Token hiện ở đầu trang (hoặc copy ở cột Verify token trong bảng kênh).
+                    </>,
+                    <>
+                      Quay lại Meta, mục <b>1. Đặt cấu hình webhook</b>: dán <b>Callback URL</b> vào “URL gọi lại”,{' '}
+                      <b>Verify Token</b> vào “Xác minh mã” → <b>Xác minh và lưu</b>.
+                    </>,
+                    <>
+                      Bấm <b>Kiểm tra</b> ở bảng kênh, thấy “OK” là xong. Nhắn thử vào Fanpage từ một tài khoản Facebook khác.
                     </>,
                   ].map((step, i) => (
                     <li key={i} className="flex gap-3">
