@@ -1,4 +1,4 @@
-import { BotService, chunkText, NO_INFO, parseDraftRules, scoreRule, RuleCandidate, wantsHuman } from './bot.service';
+import { BotService, chunkText, hasPhoneNumber, NO_INFO, parseDraftRules, scoreRule, RuleCandidate, wantsHuman } from './bot.service';
 
 const rule = (over: Partial<RuleCandidate> = {}): RuleCandidate => ({
   id: 'r1',
@@ -119,6 +119,21 @@ describe('BotService.resolve', () => {
       expect(await service.resolve(bot, [fee], [], 'phí ship bao nhiêu')).toMatchObject({ source: 'rule', text: '30k' });
       expect(llm.complete).not.toHaveBeenCalled();
     });
+  });
+
+  it('lets the LLM answer order details even when the matched rule is verbatim-only', async () => {
+    const llm = { complete: jest.fn().mockResolvedValue({ text: 'Dạ em tóm tắt đơn…', provider: 'p', model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 5 }) };
+    const service = new BotService({} as any, llm as any);
+    const jean = rule({ id: 'jean', name: 'Quần jean', keywords: ['quần jean'], answer: 'Quần jean 399k' });
+    const order = 'Quần jean size 30\n1 cái\nHoàng Hiếu\n0988 123 123\n31a, ngõ 2';
+    expect(await service.resolve(bot, [jean], [], order)).toMatchObject({ source: 'llm', ruleId: 'jean' });
+    expect(await service.resolve(bot, [jean], [], 'quần jean giá bao nhiêu')).toMatchObject({ source: 'rule', text: 'Quần jean 399k' });
+    expect(llm.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it('spots phone numbers', () => {
+    for (const t of ['0988123123', 'sđt 0988.123.123', '+84 988 123 123']) expect(hasPhoneNumber(t)).toBe(true);
+    for (const t of ['size 30', 'eo 76cm 60-65kg', '31a, ngõ 2', '123456789012']) expect(hasPhoneNumber(t)).toBe(false);
   });
 
   describe('LLM without an answer', () => {

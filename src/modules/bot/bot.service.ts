@@ -36,6 +36,12 @@ export const NO_INFO = 'KHONG_CO_THONG_TIN';
 /** How many matched rules the LLM sees as the focus of a tailored answer (e.g. both the shirt and the trouser size table). */
 const FOCUS_RULES = 3;
 
+/** A Vietnamese phone number means the customer is sending their details (order, booking), not asking the rule's question. */
+// shortcut: only VN numbers (0xxxxxxxxx / +84xxxxxxxxx); upgrade if tenants serve other countries.
+export function hasPhoneNumber(text: string): boolean {
+  return /(?:\+84|\b0)(?:[\s.-]?\d){9}\b/.test(text);
+}
+
 export interface DraftRule {
   name: string;
   keywords: string[];
@@ -478,7 +484,8 @@ export class BotService {
     const rule = this.pickRule(matched);
     if (rule) {
       const verbatim: ResolveResult = { text: rule.answer, source: 'rule', ruleId: rule.id, quickReplies: rule.quickReplies ?? [] };
-      if (!rule.useAi || !bot.llmEnabled) return verbatim;
+      // Order details ("quần jean size 30, 0988…, địa chỉ…") hit a product keyword, but the product blurb is no reply to them.
+      if (!(rule.useAi || hasPhoneNumber(text)) || !bot.llmEnabled) return verbatim;
       // Every matched rule goes in as focus: "quần size gì" hits the shirt rule first but the trouser table must be there too.
       const focus = matched.slice(0, FOCUS_RULES).map((c) => c.rule);
       const tailored = await this.askLlm(bot, rules, history, focus, rule.id);
@@ -565,7 +572,9 @@ export class BotService {
             'Tin nhắn mới nhất của khách liên quan nhiều nhất tới các mục sau, ưu tiên dùng chúng:',
             ...focus.map((rule) => `- ${rule.name}: ${rule.answer}`),
             'Áp dụng vào đúng trường hợp của khách: dùng mọi chi tiết khách đã nói trong hội thoại (số đo, sản phẩm hay dịch vụ, địa chỉ, số lượng, độ tuổi, ngày giờ…) để trả lời cụ thể (ví dụ chọn đúng một size, một gói, một khung giờ, một mức phí), không gửi lại cả bảng. ' +
-              'Chỉ hỏi thêm đúng phần thông tin còn thiếu. Nếu thông tin của khách nằm ngoài các mức có sẵn, nói rõ điều đó và gợi ý mức gần nhất.',
+              'Chỉ tư vấn cho đúng sản phẩm hay dịch vụ khách đang hỏi hoặc vừa xem gần nhất trong hội thoại (khách đang xem quần thì chỉ nói size quần), không kể thêm sản phẩm khác; chưa rõ khách hỏi cái nào thì hỏi lại. ' +
+              'Chỉ hỏi thêm đúng phần thông tin còn thiếu. Nếu thông tin của khách nằm ngoài các mức có sẵn, nói rõ điều đó và gợi ý mức gần nhất. ' +
+              'Nếu khách gửi thông tin để đặt hàng hay đặt lịch (sản phẩm, size, số lượng, họ tên, số điện thoại, địa chỉ…), không giới thiệu lại sản phẩm: tóm tắt lại thông tin khách gửi để khách kiểm tra, hỏi phần còn thiếu, và báo nhân viên sẽ liên hệ xác nhận; không tự khẳng định đơn hay lịch đã được xác nhận.',
           ]
         : []),
       '',
