@@ -32,13 +32,16 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   const config = app.get(ConfigService);
-  const swagger = new DocumentBuilder()
-    .setTitle('bv-agent-msg')
-    .setDescription('API quản trị bot CSKH đa kênh')
-    .setVersion('0.1')
-    .addCookieAuth('bv_session')
-    .build();
-  SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swagger));
+  // API docs only outside production: they map every admin endpoint for an attacker.
+  if (config.getOrThrow<string>('NODE_ENV') !== 'production') {
+    const swagger = new DocumentBuilder()
+      .setTitle('bv-agent-msg')
+      .setDescription('API quản trị bot CSKH đa kênh')
+      .setVersion('0.1')
+      .addCookieAuth('bv_session')
+      .build();
+    SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swagger));
+  }
 
   // Public page Meta requires as the App's privacy policy URL; shared by every shop.
   const privacyFile = join(process.cwd(), 'public', 'privacy.html');

@@ -16,6 +16,10 @@ export const PASSWORD_RULE_MESSAGE = 'Mật khẩu mới cần 8-128 ký tự, c
 
 const SESSION_DAYS = 7;
 
+/** Hash of a random secret, same params as real password hashes; built once on first use. */
+let dummyHashPromise: Promise<string> | undefined;
+const dummyHash = () => (dummyHashPromise ??= argon2.hash(randomToken(), { type: argon2.argon2id }));
+
 @Injectable()
 export class AuthService {
   readonly cookieName: string;
@@ -47,7 +51,9 @@ export class AuthService {
       .where(eq(users.username, username.trim().toLowerCase()))
       .limit(1);
     const user = row?.user;
-    if (!user || !(await argon2.verify(user.passwordHash, password))) {
+    // Unknown user still pays one argon2 verify, so response time does not reveal which usernames exist.
+    const passwordOk = await argon2.verify(user?.passwordHash ?? (await dummyHash()), password);
+    if (!user || !passwordOk) {
       await this.audit.record(
         { user: null, ip, username: username.trim().toLowerCase() },
         { action: 'auth.login_failed', workspaceId: user?.workspaceId ?? null, metadata: { reason: user ? 'wrong_password' : 'unknown_user' } },
